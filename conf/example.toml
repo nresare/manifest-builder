@@ -1,0 +1,16 @@
+# Example chart configuration
+# This is a sample configuration file showing the structure
+
+[[chart]]
+name = "nginx-ingress"
+namespace = "ingress-system"
+chart = "oci://ghcr.io/nginxinc/charts/nginx-ingress"
+version = "1.1.0"
+values = []
+
+# Example with local chart and values files
+# [[chart]]
+# name = "myapp"
+# namespace = "default"
+# chart = "./charts/myapp"
+# values = ["values/myapp/base.yaml", "values/myapp/prod.yaml"]
