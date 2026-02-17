@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: The manifest-builder contributors
 """Command-line interface for manifest-builder."""
 
 import sys

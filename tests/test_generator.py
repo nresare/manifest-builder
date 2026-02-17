@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: The manifest-builder contributors
 """Tests for manifest writing and stale file removal."""
 
 from pathlib import Path
 
-from manifest_builder.generator import write_manifests
+from manifest_builder.generator import strip_helm_metadata, write_manifests
 
 NAMESPACED_YAML = """\
 apiVersion: apps/v1
@@ -67,6 +69,77 @@ def test_write_manifests_skips_empty_documents(tmp_path: Path) -> None:
     yaml_with_empty = "---\n" + NAMESPACED_YAML + "---\n"
     paths = write_manifests(yaml_with_empty, tmp_path, "default")
     assert len(paths) == 1
+
+
+def test_strip_helm_metadata_removes_helm_labels() -> None:
+    doc = {
+        "metadata": {
+            "labels": {
+                "app": "myapp",
+                "helm.sh/chart": "mychart-1.0.0",
+                "app.kubernetes.io/managed-by": "Helm",
+            }
+        }
+    }
+    strip_helm_metadata(doc)
+    assert doc["metadata"]["labels"] == {"app": "myapp"}
+
+
+def test_strip_helm_metadata_removes_helm_annotations() -> None:
+    doc = {
+        "metadata": {
+            "annotations": {
+                "helm.sh/hook": "post-install",
+                "helm.sh/hook-weight": "1",
+                "custom.io/keep": "yes",
+            }
+        }
+    }
+    strip_helm_metadata(doc)
+    assert doc["metadata"]["annotations"] == {"custom.io/keep": "yes"}
+
+
+def test_strip_helm_metadata_removes_empty_dicts() -> None:
+    doc = {
+        "metadata": {
+            "labels": {"helm.sh/chart": "mychart-1.0.0"},
+            "annotations": {"helm.sh/hook": "post-install"},
+        }
+    }
+    strip_helm_metadata(doc)
+    assert "labels" not in doc["metadata"]
+    assert "annotations" not in doc["metadata"]
+
+
+def test_strip_helm_metadata_strips_pod_template() -> None:
+    doc = {
+        "metadata": {"labels": {"helm.sh/chart": "mychart-1.0.0", "app": "myapp"}},
+        "spec": {
+            "template": {
+                "metadata": {
+                    "labels": {"helm.sh/chart": "mychart-1.0.0", "app": "myapp"},
+                    "annotations": {"helm.sh/hook": "post-install"},
+                }
+            }
+        },
+    }
+    strip_helm_metadata(doc)
+    assert doc["metadata"]["labels"] == {"app": "myapp"}
+    assert doc["spec"]["template"]["metadata"]["labels"] == {"app": "myapp"}
+    assert "annotations" not in doc["spec"]["template"]["metadata"]
+
+
+def test_strip_helm_metadata_preserves_non_helm_managed_by() -> None:
+    doc = {
+        "metadata": {
+            "labels": {"app.kubernetes.io/managed-by": "ArgoCD", "app": "myapp"}
+        }
+    }
+    strip_helm_metadata(doc)
+    assert doc["metadata"]["labels"] == {
+        "app.kubernetes.io/managed-by": "ArgoCD",
+        "app": "myapp",
+    }
 
 
 def test_write_manifests_returns_paths_for_stale_file_removal(tmp_path: Path) -> None:

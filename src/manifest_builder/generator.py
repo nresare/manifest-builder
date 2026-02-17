@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: The manifest-builder contributors
 """Manifest generation orchestration."""
 
 from pathlib import Path
@@ -141,6 +143,28 @@ def generate_manifests(
     print(summary)
 
 
+def _strip_helm_from_metadata(metadata: dict) -> None:
+    for key in ("labels", "annotations"):
+        if key in metadata:
+            metadata[key] = {
+                k: v
+                for k, v in metadata[key].items()
+                if not k.startswith("helm.sh/")
+                and not (k == "app.kubernetes.io/managed-by" and v == "Helm")
+            }
+            if not metadata[key]:
+                del metadata[key]
+
+
+def strip_helm_metadata(doc: dict) -> dict:
+    """Remove helm-specific labels and annotations from a Kubernetes manifest."""
+    _strip_helm_from_metadata(doc.get("metadata") or {})
+    template_metadata = (doc.get("spec") or {}).get("template", {}).get("metadata")
+    if template_metadata:
+        _strip_helm_from_metadata(template_metadata)
+    return doc
+
+
 def write_manifests(
     content: str, output_dir: Path, namespace: str, verbose: bool = False
 ) -> set[Path]:
@@ -167,6 +191,7 @@ def write_manifests(
 
     written: set[Path] = set()
     for doc in documents:
+        strip_helm_metadata(doc)
         kind = doc.get("kind")
         name = doc.get("metadata", {}).get("name")
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: The manifest-builder contributors
 """Helmfile YAML parsing for chart source resolution."""
 
 from dataclasses import dataclass

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: The manifest-builder contributors
 """Tests for helmfile.yaml parsing."""
 
 import textwrap

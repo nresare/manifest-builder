@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: The manifest-builder contributors
 """Configuration parsing and validation for manifest-builder."""
 
 import tomllib
