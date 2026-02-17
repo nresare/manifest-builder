@@ -1,0 +1,14 @@
+# Chart configurations reference releases defined in helmfile.yaml.
+# The release provides the chart source (repo, chart name, version).
+
+[[chart]]
+release = "cert-manager"
+namespace = "cert-manager"
+values = []
+
+# Example with a direct chart reference (no helmfile.yaml entry needed):
+# [[chart]]
+# name = "myapp"
+# namespace = "default"
+# chart = "./charts/myapp"
+# values = ["values/myapp/base.yaml", "values/myapp/prod.yaml"]

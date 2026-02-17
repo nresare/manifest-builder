@@ -1,13 +1,13 @@
 """Command-line interface for manifest-builder."""
 
-import shutil
 import sys
 from pathlib import Path
 
 import click
 
-from manifest_builder.config import load_configs
+from manifest_builder.config import load_configs, resolve_configs
 from manifest_builder.generator import generate_manifests
+from manifest_builder.helmfile import load_helmfile
 
 
 @click.command()
@@ -33,22 +33,10 @@ from manifest_builder.generator import generate_manifests
     is_flag=True,
     help="Show detailed output",
 )
-@click.option(
-    "--charts",
-    type=str,
-    help="Comma-separated list of chart names to generate (default: all)",
-)
-@click.option(
-    "--clean",
-    is_flag=True,
-    help="Remove output directory before generating",
-)
 def main(
     config_dir: Path,
     output_dir: Path,
     verbose: bool,
-    charts: str | None,
-    clean: bool,
 ) -> None:
     """Generate Kubernetes manifests from Helm charts."""
     try:
@@ -65,31 +53,20 @@ def main(
             click.echo(f"Output directory: {output_dir}")
             click.echo()
 
-        # Clean output directory if requested
-        if clean and output_dir.exists():
-            if verbose:
-                click.echo(f"Removing {output_dir}...")
-            shutil.rmtree(output_dir)
+        # Load helmfile if present
+        helmfile_path = config_dir / "helmfile.yaml"
+        helmfile_data = load_helmfile(helmfile_path) if helmfile_path.exists() else None
+        if verbose and helmfile_data is not None:
+            click.echo(
+                f"Loaded helmfile.yaml: {len(helmfile_data.releases)} release(s)"
+            )
 
-        # Load configurations
+        # Load and resolve configurations
         configs = load_configs(config_dir)
+        configs = resolve_configs(configs, helmfile_data)
 
         if verbose:
             click.echo(f"Loaded {len(configs)} chart configuration(s)")
-
-        # Filter by chart names if specified
-        if charts:
-            chart_names = {name.strip() for name in charts.split(",")}
-            configs = [c for c in configs if c.name in chart_names]
-
-            if not configs:
-                click.echo(f"No charts found matching: {charts}", err=True)
-                sys.exit(1)
-
-            if verbose:
-                click.echo(
-                    f"Filtered to {len(configs)} chart(s): {', '.join(chart_names)}"
-                )
 
         # Generate manifests
         generate_manifests(

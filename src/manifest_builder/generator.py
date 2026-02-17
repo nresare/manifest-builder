@@ -64,7 +64,7 @@ def generate_manifests(
         validate_config(config, repo_root)
 
     # Generate manifests
-    success_count = 0
+    written_paths: set[Path] = set()
     for config in configs:
         if verbose:
             print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
@@ -75,6 +75,12 @@ def generate_manifests(
                 print(f"  Version: {config.version}")
             if config.values:
                 print(f"  Values: {', '.join(config.values)}")
+
+        if config.chart is None:
+            raise ValueError(
+                f"Chart '{config.name}' has no resolved chart reference; "
+                "ensure resolve_configs() was called before generate_manifests()"
+            )
 
         # Resolve values file paths
         values_paths = [repo_root / v for v in config.values]
@@ -104,23 +110,41 @@ def generate_manifests(
             )
 
             # Split and write manifests to individual files
-            file_count = write_manifests(
+            paths = write_manifests(
                 manifest_content, output_dir, config.namespace, verbose
             )
+            written_paths.update(paths)
 
-            print(f"✓ {config.name} ({config.namespace}) -> {file_count} file(s)")
-            success_count += file_count
+            print(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
 
         except Exception as e:
             print(f"✗ {config.name} ({config.namespace}): {e}")
             raise
 
-    print(f"\nDone! Generated {success_count} manifest(s)")
+    # Remove any stale files left over from previous runs
+    removed = 0
+    if output_dir.exists():
+        for existing in output_dir.rglob("*.yaml"):
+            if existing not in written_paths:
+                existing.unlink()
+                removed += 1
+                if verbose:
+                    print(f"  removed {existing.relative_to(output_dir)}")
+        # Remove any empty directories
+        for directory in sorted(output_dir.rglob("*"), reverse=True):
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+
+    total = len(written_paths)
+    summary = f"\nDone! Generated {total} manifest(s)"
+    if removed:
+        summary += f", removed {removed} stale file(s)"
+    print(summary)
 
 
 def write_manifests(
     content: str, output_dir: Path, namespace: str, verbose: bool = False
-) -> int:
+) -> set[Path]:
     """
     Split YAML content into individual documents and write each to a separate file.
 
@@ -135,14 +159,14 @@ def write_manifests(
         verbose: If True, print each file written
 
     Returns:
-        Number of files written
+        Set of paths written
 
     Raises:
         OSError: If files cannot be written
     """
     documents = [doc for doc in yaml.safe_load_all(content) if doc]
 
-    file_count = 0
+    written: set[Path] = set()
     for doc in documents:
         kind = doc.get("kind")
         name = doc.get("metadata", {}).get("name")
@@ -166,6 +190,6 @@ def write_manifests(
         if verbose:
             print(f"  → {subdir}/{filename}")
 
-        file_count += 1
+        written.add(output_path)
 
-    return file_count
+    return written
