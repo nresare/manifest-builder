@@ -12,6 +12,7 @@ class ChartConfig:
     name: str
     namespace: str
     chart: str
+    repo: str | None
     version: str | None
     values: list[str]
 
@@ -70,6 +71,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
         name=data["name"],
         namespace=data["namespace"],
         chart=data["chart"],
+        repo=data.get("repo"),
         version=data.get("version"),
         values=data.get("values", []),
     )

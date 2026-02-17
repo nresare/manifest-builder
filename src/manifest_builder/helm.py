@@ -23,6 +23,66 @@ def check_helm_available() -> bool:
         return False
 
 
+def pull_chart(
+    chart: str,
+    repo: str,
+    dest: Path,
+    version: str | None = None,
+) -> Path:
+    """
+    Pull a chart from a repository and untar it to a local directory.
+
+    Skips the pull if the destination already exists.
+
+    Args:
+        chart: Chart name within the repository
+        repo: Repository URL
+        dest: Directory to untar the chart into
+        version: Optional chart version
+
+    Returns:
+        Path to the untarred chart directory
+
+    Raises:
+        RuntimeError: If helm pull fails
+    """
+    chart_dir = dest / chart
+
+    if chart_dir.exists():
+        return chart_dir
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "helm",
+        "pull",
+        chart,
+        "--repo",
+        repo,
+        "--untar",
+        "--untardir",
+        str(dest),
+    ]
+
+    if version:
+        cmd.extend(["--version", version])
+
+    try:
+        subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"helm pull failed for {chart}: {e.stderr}") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"helm pull timed out for {chart}") from e
+
+    return chart_dir
+
+
 def run_helm_template(
     release_name: str,
     chart: str,
@@ -38,14 +98,13 @@ def run_helm_template(
         chart: Chart reference (repo/chart, local path, or OCI URL)
         namespace: Kubernetes namespace
         values_files: List of values files to apply
-        version: Optional chart version
+        version: Optional chart version (ignored for local paths)
 
     Returns:
         Generated YAML manifests as a string
 
     Raises:
-        subprocess.CalledProcessError: If helm command fails
-        RuntimeError: If helm is not available
+        RuntimeError: If helm is not available or the command fails
     """
     if not check_helm_available():
         raise RuntimeError(
@@ -62,11 +121,9 @@ def run_helm_template(
         namespace,
     ]
 
-    # Add values files
     for values_file in values_files:
         cmd.extend(["-f", str(values_file)])
 
-    # Add version if specified
     if version:
         cmd.extend(["--version", version])
 
@@ -80,8 +137,8 @@ def run_helm_template(
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
-        error_msg = f"helm template failed for {release_name}: {e.stderr}"
-        raise RuntimeError(error_msg) from e
+        raise RuntimeError(
+            f"helm template failed for {release_name}: {e.stderr}"
+        ) from e
     except subprocess.TimeoutExpired as e:
-        error_msg = f"helm template timed out for {release_name}"
-        raise RuntimeError(error_msg) from e
+        raise RuntimeError(f"helm template timed out for {release_name}") from e

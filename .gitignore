@@ -12,6 +12,9 @@ wheels/
 # Generated manifests
 output/
 
+# Pulled Helm charts cache
+.charts/
+
 # IDE
 .idea/
 
