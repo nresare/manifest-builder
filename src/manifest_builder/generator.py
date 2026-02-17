@@ -7,6 +7,29 @@ import yaml
 from manifest_builder.config import ChartConfig, validate_config
 from manifest_builder.helm import pull_chart, run_helm_template
 
+# Kubernetes resource kinds that are cluster-scoped (not namespaced)
+CLUSTER_SCOPED_KINDS = {
+    "APIService",
+    "CertificateSigningRequest",
+    "ClusterRole",
+    "ClusterRoleBinding",
+    "CSIDriver",
+    "CSINode",
+    "CustomResourceDefinition",
+    "FlowSchema",
+    "IngressClass",
+    "Namespace",
+    "Node",
+    "PersistentVolume",
+    "PriorityClass",
+    "PriorityLevelConfiguration",
+    "RuntimeClass",
+    "StorageClass",
+    "MutatingWebhookConfiguration",
+    "ValidatingWebhookConfiguration",
+    "VolumeAttachment",
+}
+
 
 def generate_manifests(
     configs: list[ChartConfig],
@@ -81,14 +104,11 @@ def generate_manifests(
             )
 
             # Split and write manifests to individual files
-            output_namespace_dir = output_dir / config.namespace
             file_count = write_manifests(
-                manifest_content, output_namespace_dir, verbose
+                manifest_content, output_dir, config.namespace, verbose
             )
 
-            print(
-                f"✓ {config.name} ({config.namespace}) -> {file_count} file(s) in {output_namespace_dir}"
-            )
+            print(f"✓ {config.name} ({config.namespace}) -> {file_count} file(s)")
             success_count += file_count
 
         except Exception as e:
@@ -98,15 +118,20 @@ def generate_manifests(
     print(f"\nDone! Generated {success_count} manifest(s)")
 
 
-def write_manifests(content: str, output_dir: Path, verbose: bool = False) -> int:
+def write_manifests(
+    content: str, output_dir: Path, namespace: str, verbose: bool = False
+) -> int:
     """
     Split YAML content into individual documents and write each to a separate file.
 
-    Files are named following the pattern: kind-name.yaml
+    Files are named following the pattern: kind-name.yaml, written into
+    output_dir/<namespace>/ for namespaced resources or output_dir/cluster/
+    for cluster-scoped resources.
 
     Args:
         content: YAML manifest content with multiple documents
-        output_dir: Directory to write the manifest files
+        output_dir: Base output directory
+        namespace: Kubernetes namespace (used for namespaced resources)
         verbose: If True, print each file written
 
     Returns:
@@ -114,37 +139,32 @@ def write_manifests(content: str, output_dir: Path, verbose: bool = False) -> in
 
     Raises:
         OSError: If files cannot be written
-        ValueError: If YAML documents are missing required fields
     """
-    # Create output directory if it doesn't exist
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Parse all YAML documents
-    documents = list(yaml.safe_load_all(content))
-
-    # Filter out None/empty documents
-    documents = [doc for doc in documents if doc]
+    documents = [doc for doc in yaml.safe_load_all(content) if doc]
 
     file_count = 0
     for doc in documents:
-        # Extract kind and name
         kind = doc.get("kind")
         name = doc.get("metadata", {}).get("name")
 
         if not kind or not name:
-            # Skip documents without kind or name (e.g., hooks, notes)
             continue
 
-        # Create filename: kind-name.yaml (lowercase kind)
-        filename = f"{kind.lower()}-{name}.yaml"
-        output_path = output_dir / filename
+        if kind in CLUSTER_SCOPED_KINDS:
+            subdir = "cluster"
+        else:
+            subdir = doc.get("metadata", {}).get("namespace") or namespace
+        dest_dir = output_dir / subdir
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write the document
+        filename = f"{kind.lower()}-{name}.yaml"
+        output_path = dest_dir / filename
+
         with open(output_path, "w") as f:
             yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
 
         if verbose:
-            print(f"  → {filename}")
+            print(f"  → {subdir}/{filename}")
 
         file_count += 1
 
