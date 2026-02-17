@@ -74,7 +74,7 @@ def generate_manifests(
             if config.version:
                 print(f"  Version: {config.version}")
             if config.values:
-                print(f"  Values: {', '.join(config.values)}")
+                print(f"  Values: {', '.join(str(v) for v in config.values)}")
 
         if config.chart is None:
             raise ValueError(
@@ -82,8 +82,7 @@ def generate_manifests(
                 "ensure resolve_configs() was called before generate_manifests()"
             )
 
-        # Resolve values file paths
-        values_paths = [repo_root / v for v in config.values]
+        values_paths = config.values
 
         # Pull chart from repo if configured
         if config.repo:

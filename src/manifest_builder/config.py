@@ -16,7 +16,7 @@ class ChartConfig:
     chart: str | None  # None when using a helmfile release reference
     repo: str | None
     version: str | None
-    values: list[str]
+    values: list[Path]
     release: str | None  # helmfile release name; None for direct chart entries
 
 
@@ -50,12 +50,17 @@ def load_configs(config_dir: Path) -> list[ChartConfig]:
         with open(toml_file, "rb") as f:
             data = tomllib.load(f)
 
-        if "chart" not in data:
-            raise ValueError(f"No [[chart]] entries found in {toml_file}")
+        if "app" not in data:
+            raise ValueError(f"No [[app]] entries found in {toml_file}")
 
-        for chart_data in data["chart"]:
-            config = _parse_chart_config(chart_data, toml_file)
-            configs.append(config)
+        for app_data in data["app"]:
+            app_type = app_data.get("type")
+            if app_type is None:
+                raise ValueError(f"Missing required field 'type' in {toml_file}")
+            if app_type == "helm":
+                configs.append(_parse_chart_config(app_data, toml_file))
+            else:
+                raise ValueError(f"Unknown app type '{app_type}' in {toml_file}")
 
     return configs
 
@@ -72,6 +77,9 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
     if "namespace" not in data:
         raise ValueError(f"Missing required field 'namespace' in {source_file}")
 
+    config_dir = source_file.parent
+    values = [config_dir / v for v in data.get("values", [])]
+
     if has_release:
         return ChartConfig(
             name=data["release"],
@@ -79,7 +87,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             chart=None,
             repo=None,
             version=None,
-            values=data.get("values", []),
+            values=values,
             release=data["release"],
         )
     else:
@@ -91,7 +99,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             chart=data["chart"],
             repo=data.get("repo"),
             version=data.get("version"),
-            values=data.get("values", []),
+            values=values,
             release=None,
         )
 
@@ -178,11 +186,10 @@ def validate_config(config: ChartConfig, repo_root: Path) -> None:
     Raises:
         ValueError: If validation fails
     """
-    for values_file in config.values:
-        values_path = repo_root / values_file
+    for values_path in config.values:
         if not values_path.exists():
             raise ValueError(
-                f"Values file not found for chart '{config.name}': {values_file}"
+                f"Values file not found for chart '{config.name}': {values_path}"
             )
 
     if config.chart is not None and (

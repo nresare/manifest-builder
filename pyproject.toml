@@ -14,6 +14,7 @@ manifest-builder = "manifest_builder.cli:main"
 
 [dependency-groups]
 dev = [
+    "pytest",
     "ruff",
     "ty",
 ]
