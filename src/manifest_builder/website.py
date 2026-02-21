@@ -106,10 +106,28 @@ def generate_website(
                 "namespace"
             ] = config.namespace
 
-    # Apply hugo_repo annotation to Deployment objects if configured
+    # Apply Hugo fragments and annotations if configured
     if config.hugo_repo:
         for doc in docs:
             if doc.get("kind") == "Deployment":
+                # Inject Hugo init containers if available
+                if "hugo_initcontainers" in fragments:
+                    doc.setdefault("spec", {}).setdefault("template", {}).setdefault(
+                        "spec", {}
+                    )["initContainers"] = fragments["hugo_initcontainers"]
+
+                # Inject Hugo container if available
+                if "hugo_container" in fragments:
+                    containers = doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {}).setdefault("containers", [])
+                    containers.append(fragments["hugo_container"])
+
+                # Inject Hugo volumes if available
+                if "hugo_volumes" in fragments:
+                    doc.setdefault("spec", {}).setdefault("template", {}).setdefault(
+                        "spec", {}
+                    )["volumes"] = fragments["hugo_volumes"]
+
+                # Add Hugo repo annotation
                 doc.setdefault("metadata", {}).setdefault("annotations", {})[
                     "hugo"
                 ] = config.hugo_repo

@@ -481,3 +481,61 @@ def test_generate_website_git_repo_parameter_from_hugo_repo(tmp_path: Path) -> N
 
     # If rendering succeeds without errors, the git_repo parameter was available
     # (errors would indicate the parameter wasn't in the context)
+
+
+def test_generate_website_injects_hugo_fragments(tmp_path: Path) -> None:
+    """Hugo fragments should be injected into Deployment when hugo_repo is set."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    # Create the deployment template
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    # Create Hugo fragment files
+    (templates_dir / "_hugo_container.yaml").write_text(
+        "name: web\nimage: static-web-server:2.36.1\nvolumeMounts:\n  - mountPath: /public\n    name: public\n"
+    )
+
+    (templates_dir / "_hugo_initcontainers.yaml").write_text(
+        "- name: git\n  image: alpine/git:2.47.2\n  command:\n  - /bin/sh\n  - -c\n  - >\n    git clone {{git_repo}} --recurse-submodules --depth=1 /src\n"
+    )
+
+    (templates_dir / "_hugo_volumes.yaml").write_text(
+        "- name: public\n  emptyDir: {}\n"
+    )
+
+    config = WebsiteConfig(
+        name="my-website",
+        namespace="production",
+        image="nginx:latest",
+        hugo_repo="https://github.com/user/my-website",
+    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    (path,) = paths
+    doc = yaml.safe_load(path.read_text())
+
+    # Verify containers were injected
+    containers = doc["spec"]["template"]["spec"]["containers"]
+    assert len(containers) == 2  # original + injected
+    assert containers[0]["name"] == "my-website"
+    assert containers[0]["image"] == "nginx:latest"
+    assert containers[1]["name"] == "web"
+    assert "static-web-server" in containers[1]["image"]
+
+    # Verify init containers were injected
+    init_containers = doc["spec"]["template"]["spec"]["initContainers"]
+    assert len(init_containers) == 1
+    assert init_containers[0]["name"] == "git"
+    # The command contains the git clone with the expanded git_repo
+    command_script = init_containers[0]["command"][2]
+    assert "git clone https://github.com/user/my-website" in command_script
+
+    # Verify volumes were injected
+    volumes = doc["spec"]["template"]["spec"]["volumes"]
+    assert any(v["name"] == "public" for v in volumes)
+
+    # Verify hugo annotation was added
+    assert doc["metadata"]["annotations"]["hugo"] == "https://github.com/user/my-website"

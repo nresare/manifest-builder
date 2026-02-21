@@ -1,0 +1,21 @@
+- name: git
+  image: alpine/git:2.47.2
+  command:
+  - /bin/sh
+  - -c
+  - |-
+    if [ ! -d /src/.git ]; then
+      git clone {{git_repo}} --recurse-submodules --depth=1 /src
+    else
+      git pull --recurse-submodules
+    fi
+  volumeMounts:
+    - mountPath: /src
+      name: src
+- name: hugo
+  image: floryn90/hugo:0.155.3-alpine
+  volumeMounts:
+    - mountPath: /src
+      name: src
+    - mountPath: /src/public
+      name: public
