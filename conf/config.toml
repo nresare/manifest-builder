@@ -16,7 +16,14 @@ values = ["cert-manager/values.yaml"]
 [[websites]]
 name = "zq.lu"
 namespace = "web"
+hugo_repo = "https://github.com/nresare/zq.lu"
 
 [[websites]]
 name = "noa.re"
 namespace = "web"
+hugo_repo = "https://github.com/nresare/noa.re"
+
+[[websites]]
+name = "id.noa.re"
+namespace = "idelephant"
+imge = "nresare/idelephant:latest"

@@ -37,11 +37,15 @@ def generate_website(
 
         templates_dir = Path(str(get_package_files("manifest_builder") / "templates" / "web"))
 
-    # Prepare the template context with both original name and Kubernetes-safe name
+    # Prepare the template context with name, k8s_name, and optional image/args
     context = {
         "name": config.name,
         "k8s_name": _make_k8s_name(config.name),
     }
+    if config.image:
+        context["image"] = config.image
+    if config.args:
+        context["args"] = config.args
 
     docs: list[dict] = []
     for template_file in sorted(templates_dir.glob("*.yaml")):
@@ -63,5 +67,13 @@ def generate_website(
             doc.setdefault("metadata", {})[
                 "namespace"
             ] = config.namespace
+
+    # Apply hugo_repo annotation to Deployment objects if configured
+    if config.hugo_repo:
+        for doc in docs:
+            if doc.get("kind") == "Deployment":
+                doc.setdefault("metadata", {}).setdefault("annotations", {})[
+                    "hugo"
+                ] = config.hugo_repo
 
     return _write_documents(docs, output_dir, config.namespace, verbose, config.name)

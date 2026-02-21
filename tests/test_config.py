@@ -372,6 +372,111 @@ def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
         load_configs(conf_dir)
 
 
+def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "production"
+        hugo_repo = "https://github.com/user/repo"
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.hugo_repo == "https://github.com/user/repo"
+
+
+def test_load_website_config_with_image(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "production"
+        image = "nginx:latest"
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.image == "nginx:latest"
+
+
+def test_load_website_config_with_args_string(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "production"
+        args = "--flag=value"
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.args == "--flag=value"
+
+
+def test_load_website_config_with_args_list(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "production"
+        args = ["--flag1=value1", "--flag2=value2"]
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.args == ["--flag1=value1", "--flag2=value2"]
+
+
+def test_load_website_config_hugo_repo_and_image_mutually_exclusive(
+    tmp_path: Path,
+) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "production"
+        hugo_repo = "https://github.com/user/repo"
+        image = "nginx:latest"
+        """,
+    )
+
+    with pytest.raises(ValueError, match="Cannot specify both 'hugo_repo' and 'image'"):
+        load_configs(conf_dir)
+
+
 def test_resolve_configs_passes_website_config_through() -> None:
     config = WebsiteConfig(
         name="my-website",

@@ -29,6 +29,9 @@ class WebsiteConfig:
 
     name: str
     namespace: str
+    hugo_repo: str | None = None
+    image: str | None = None
+    args: str | list[str] | None = None
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
@@ -120,9 +123,20 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         if field not in data:
             raise ValueError(f"Missing required field '{field}' in {source_file}")
 
+    hugo_repo = data.get("hugo_repo")
+    image = data.get("image")
+
+    if hugo_repo and image:
+        raise ValueError(
+            f"Cannot specify both 'hugo_repo' and 'image' in {source_file}"
+        )
+
     return WebsiteConfig(
         name=data["name"],
         namespace=data["namespace"],
+        hugo_repo=hugo_repo,
+        image=image,
+        args=data.get("args"),
     )
 
 
