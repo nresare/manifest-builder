@@ -26,4 +26,5 @@ hugo_repo = "https://github.com/nresare/noa.re"
 [[websites]]
 name = "id.noa.re"
 namespace = "idelephant"
-imge = "nresare/idelephant:latest"
+image = "nresare/idelephant:latest"
+args = ["-c", "/config/idelephant.toml"]
