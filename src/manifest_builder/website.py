@@ -10,6 +10,35 @@ from manifest_builder.config import WebsiteConfig
 from manifest_builder.generator import CLUSTER_SCOPED_KINDS, _make_k8s_name, _write_documents
 
 
+def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:
+    """Load and render underscore-prefixed fragment templates.
+
+    Fragment templates (files starting with _) are rendered with the same Mustache
+    context as regular templates but are not written to output. They can be used by
+    website.py code to programmatically inject content into documents.
+
+    Args:
+        templates_dir: Directory containing template files
+        context: Mustache rendering context
+
+    Returns:
+        Dict mapping fragment name (filename without leading _ and .yaml suffix)
+        to the parsed YAML document
+    """
+    import pystache
+
+    fragments = {}
+    for fragment_file in sorted(templates_dir.glob("_*.yaml")):
+        # Strip leading underscore and .yaml suffix to get the fragment name
+        name = fragment_file.stem[1:]
+        template_source = fragment_file.read_text()
+        rendered = pystache.render(template_source, context)
+        doc = yaml.safe_load(rendered)
+        if doc:
+            fragments[name] = doc
+    return fragments
+
+
 def generate_website(
     config: WebsiteConfig,
     output_dir: Path,
@@ -49,6 +78,10 @@ def generate_website(
 
     docs: list[dict] = []
     for template_file in sorted(templates_dir.glob("*.yaml")):
+        # Skip fragment templates (starting with underscore)
+        if template_file.name.startswith("_"):
+            continue
+
         with open(template_file) as f:
             template_source = f.read()
 
@@ -59,6 +92,9 @@ def generate_website(
         for doc in yaml.safe_load_all(rendered):
             if doc:
                 docs.append(doc)
+
+    # Load fragment templates for use in post-processing injection logic
+    fragments = _load_fragments(templates_dir, context)
 
     # Add the namespace metadata to namespaced resources
     for doc in docs:

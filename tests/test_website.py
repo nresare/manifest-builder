@@ -393,3 +393,70 @@ def test_generate_website_args_list_parameter_available_in_template(
         "--debug",
         "--log-level=info",
     ]
+
+
+def test_generate_website_ignores_underscore_prefixed_templates(tmp_path: Path) -> None:
+    """Fragment templates starting with underscore should not generate output files."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    # Create a normal deployment template
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec: {}\n"
+    )
+    # Create a fragment template that would normally generate output
+    (templates_dir / "_sidecar.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: sidecar-config\ndata: {}\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production")
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # Only the deployment should be generated, not the fragment
+    assert len(paths) == 1
+    (path,) = paths
+    assert "deployment" in path.name
+    assert "sidecar" not in path.name
+
+
+def test_generate_website_fragment_with_template_variables(tmp_path: Path) -> None:
+    """Fragment templates should be rendered with the same context as regular templates."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    # Create a fragment that uses template variables
+    (templates_dir / "_fragment.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{k8s_name}}-config\ndata: {}\n"
+    )
+
+    config = WebsiteConfig(name="my.app", namespace="production")
+    # Call generate_website which will load the fragment (though it won't output it)
+    generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # This test verifies that no errors occur during rendering with template variables
+    # (errors would indicate the fragment isn't being rendered properly)
+    # We can't directly verify the fragment was loaded, but if rendering fails, test fails
+
+
+def test_generate_website_multiple_fragments_not_in_output(tmp_path: Path) -> None:
+    """Multiple fragment templates should all be ignored in output."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    # Create one normal template
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec: {}\n"
+    )
+    # Create multiple fragments
+    (templates_dir / "_init_container.yaml").write_text(
+        "name: init\nimage: busybox\n"
+    )
+    (templates_dir / "_sidecar.yaml").write_text(
+        "name: sidecar\nimage: nginx\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production")
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # Only the deployment should be in output, both fragments ignored
+    assert len(paths) == 1
+    filenames = {p.name for p in paths}
+    assert filenames == {"deployment-web.yaml"}
+    assert not any("fragment" in p.name for p in paths)
