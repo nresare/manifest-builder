@@ -58,7 +58,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
     configs: list[ChartConfig | WebsiteConfig] = []
-    toml_files = list(config_dir.rglob("*.toml"))
+    toml_files = list(config_dir.glob("*.toml"))
 
     if not toml_files:
         raise FileNotFoundError(f"No TOML files found in {config_dir}")
