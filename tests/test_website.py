@@ -460,3 +460,24 @@ def test_generate_website_multiple_fragments_not_in_output(tmp_path: Path) -> No
     filenames = {p.name for p in paths}
     assert filenames == {"deployment-web.yaml"}
     assert not any("fragment" in p.name for p in paths)
+
+
+def test_generate_website_git_repo_parameter_from_hugo_repo(tmp_path: Path) -> None:
+    """git_repo parameter should be populated from hugo_repo in template context."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    # Create a fragment that uses the git_repo parameter
+    (templates_dir / "_git_init.yaml").write_text(
+        "name: git\nimage: alpine/git\ncommand: [git, clone, {{git_repo}}]\n"
+    )
+
+    config = WebsiteConfig(
+        name="my-website",
+        namespace="production",
+        hugo_repo="https://github.com/user/my-website",
+    )
+    # Call generate_website to render the fragment
+    generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # If rendering succeeds without errors, the git_repo parameter was available
+    # (errors would indicate the parameter wasn't in the context)

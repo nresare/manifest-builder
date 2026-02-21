@@ -66,7 +66,7 @@ def generate_website(
 
         templates_dir = Path(str(get_package_files("manifest_builder") / "templates" / "web"))
 
-    # Prepare the template context with name, k8s_name, and optional image/args
+    # Prepare the template context with name, k8s_name, and optional image/args/git_repo
     context = {
         "name": config.name,
         "k8s_name": _make_k8s_name(config.name),
@@ -75,6 +75,8 @@ def generate_website(
         context["image"] = config.image
     if config.args:
         context["args"] = config.args
+    if config.hugo_repo:
+        context["git_repo"] = config.hugo_repo
 
     docs: list[dict] = []
     for template_file in sorted(templates_dir.glob("*.yaml")):
