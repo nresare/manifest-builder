@@ -42,10 +42,10 @@ def main(
 ) -> None:
     """Generate Kubernetes manifests from Helm charts."""
     try:
-        # Get repository root (current working directory)
+        # Get the repository root (current working directory)
         repo_root = Path.cwd()
 
-        # Resolve paths relative to repo root
+        # Resolve the paths relative to the repo root
         config_dir = repo_root / config_dir
         output_dir = repo_root / output_dir
 
@@ -55,7 +55,7 @@ def main(
             click.echo(f"Output directory: {output_dir}")
             click.echo()
 
-        # Load helmfile if present
+        # Load the helmfile if present
         helmfile_path = config_dir / "helmfile.yaml"
         helmfile_data = load_helmfile(helmfile_path) if helmfile_path.exists() else None
         if verbose and helmfile_data is not None:
@@ -63,7 +63,7 @@ def main(
                 f"Loaded helmfile.yaml: {len(helmfile_data.releases)} release(s)"
             )
 
-        # Load and resolve configurations
+        # Load and resolve the configurations
         configs = load_configs(config_dir)
         configs = resolve_configs(configs, helmfile_data)
 

@@ -355,28 +355,6 @@ def test_load_website_config(tmp_path: Path) -> None:
     assert isinstance(config, WebsiteConfig)
     assert config.name == "my-website"
     assert config.namespace == "production"
-    # Website templates are hardcoded to the bundled web templates
-    assert config.patch is None
-
-
-def test_load_website_config_with_patch(tmp_path: Path) -> None:
-    conf_dir = tmp_path / "conf"
-    conf_dir.mkdir()
-    write_toml(
-        conf_dir,
-        "config.toml",
-        """\
-        [[websites]]
-        name = "my-website"
-        namespace = "default"
-        patch = "patch.py"
-        """,
-    )
-
-    configs = load_configs(conf_dir)
-    # Patch files are resolved relative to the package
-    assert "manifest_builder" in str(configs[0].patch)  # type: ignore[union-attr]
-    assert "patch.py" in str(configs[0].patch)  # type: ignore[union-attr]
 
 
 def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
@@ -394,32 +372,10 @@ def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
         load_configs(conf_dir)
 
 
-def test_validate_website_config_missing_patch_file(tmp_path: Path) -> None:
-    config = WebsiteConfig(
-        name="my-website",
-        namespace="default",
-        patch=tmp_path / "nonexistent.py",
-    )
-    with pytest.raises(ValueError, match="Patch file not found"):
-        validate_config(config, tmp_path)
-
-
-def test_validate_website_config_valid(tmp_path: Path) -> None:
-    patch_file = tmp_path / "patch.py"
-    patch_file.write_text("def patch(doc): pass\n")
-    config = WebsiteConfig(
-        name="my-website",
-        namespace="default",
-        patch=patch_file,
-    )
-    validate_config(config, tmp_path)  # should not raise
-
-
 def test_resolve_configs_passes_website_config_through() -> None:
     config = WebsiteConfig(
         name="my-website",
         namespace="default",
-        patch=None,
     )
     resolved = resolve_configs([config], None)
     assert resolved == [config]

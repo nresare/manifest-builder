@@ -29,7 +29,6 @@ class WebsiteConfig:
 
     name: str
     namespace: str
-    patch: Path | None  # optional Python file defining patch(document)
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
@@ -77,7 +76,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
 
 
 def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
-    """Parse a single helm chart configuration from TOML data."""
+    """Parse a single Helm chart configuration from TOML data."""
     has_release = "release" in data
     has_chart = "chart" in data
 
@@ -121,17 +120,9 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         if field not in data:
             raise ValueError(f"Missing required field '{field}' in {source_file}")
 
-    patch_path = None
-    if "patch" in data:
-        # Patch files are in the package
-        patch_name = data["patch"]
-        package_patch = Path(str(files("manifest_builder") / "templates" / patch_name))
-        patch_path = package_patch
-
     return WebsiteConfig(
         name=data["name"],
         namespace=data["namespace"],
-        patch=patch_path,
     )
 
 
@@ -218,10 +209,6 @@ def validate_config(config: ChartConfig | WebsiteConfig, repo_root: Path) -> Non
         ValueError: If validation fails
     """
     if isinstance(config, WebsiteConfig):
-        if config.patch is not None and not config.patch.exists():
-            raise ValueError(
-                f"Patch file not found for '{config.name}': {config.patch}"
-            )
         return
 
     for values_path in config.values:

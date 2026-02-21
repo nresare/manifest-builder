@@ -8,7 +8,8 @@ import pytest
 import yaml
 
 from manifest_builder.config import WebsiteConfig
-from manifest_builder.generator import _generate_website, _make_k8s_name, generate_manifests, strip_helm_metadata, write_manifests
+from manifest_builder.generator import _make_k8s_name, generate_manifests, strip_helm_metadata, write_manifests
+from manifest_builder.website import generate_website
 
 NAMESPACED_YAML = """\
 apiVersion: apps/v1
@@ -173,7 +174,7 @@ spec: {}
 """
 
 
-def _make_website_config(tmp_path: Path, patch: str | None = None) -> tuple[WebsiteConfig, Path]:
+def _make_website_config(tmp_path: Path) -> tuple[WebsiteConfig, Path]:
     """Create a WebsiteConfig for testing, with a temporary templates directory.
 
     Returns a tuple of (config, templates_dir).
@@ -181,24 +182,18 @@ def _make_website_config(tmp_path: Path, patch: str | None = None) -> tuple[Webs
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "deployment.yaml").write_text(SIMPLE_DEPLOYMENT)
-    patch_path = None
-    if patch is not None:
-        patch_file = tmp_path / "patch.py"
-        patch_file.write_text(patch)
-        patch_path = patch_file
     return (
         WebsiteConfig(
             name="my-website",
             namespace="staging",
-            patch=patch_path,
         ),
         templates_dir,
     )
 
 
-def test_generate_website_writes_yaml_files(tmp_path: Path) -> None:
+def testgenerate_website_writes_yaml_files(tmp_path: Path) -> None:
     config, templates_dir = _make_website_config(tmp_path)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
     assert len(paths) == 1
     (path,) = paths
@@ -206,42 +201,16 @@ def test_generate_website_writes_yaml_files(tmp_path: Path) -> None:
     assert path.exists()
 
 
-def test_generate_website_adds_source_comment(tmp_path: Path) -> None:
+def testgenerate_website_adds_source_comment(tmp_path: Path) -> None:
     config, templates_dir = _make_website_config(tmp_path)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
     (path,) = paths
     content = path.read_text()
     assert content.startswith("# Source: my-website\n")
 
 
-def test_generate_website_calls_patch_function(tmp_path: Path) -> None:
-    patch_code = """\
-def patch(doc):
-    doc.setdefault("metadata", {})["labels"] = {"patched": "true"}
-"""
-    config, templates_dir = _make_website_config(tmp_path, patch=patch_code)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
-
-    (path,) = paths
-    doc = yaml.safe_load(path.read_text())
-    assert doc["metadata"]["labels"] == {"patched": "true"}
-
-
-def test_generate_website_patch_return_value_used(tmp_path: Path) -> None:
-    patch_code = """\
-def patch(doc):
-    return {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "replaced"}}
-"""
-    config, templates_dir = _make_website_config(tmp_path, patch=patch_code)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
-
-    assert len(paths) == 1
-    (path,) = paths
-    assert path.name == "configmap-replaced.yaml"
-
-
-def test_generate_website_multiple_yaml_files(tmp_path: Path) -> None:
+def testgenerate_website_multiple_yaml_files(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "deploy.yaml").write_text(SIMPLE_DEPLOYMENT)
@@ -249,21 +218,14 @@ def test_generate_website_multiple_yaml_files(tmp_path: Path) -> None:
         "apiVersion: v1\nkind: Service\nmetadata:\n  name: simple-svc\n  namespace: staging\n"
     )
     config = WebsiteConfig(
-        name="my-website", namespace="staging", patch=None
+        name="my-website", namespace="staging"
     )
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     names = {p.name for p in paths}
     assert names == {"deployment-my-website.yaml", "service-simple-svc.yaml"}
 
 
-def test_generate_website_missing_patch_function_raises(tmp_path: Path) -> None:
-    patch_code = "# no patch function here\n"
-    config, templates_dir = _make_website_config(tmp_path, patch=patch_code)
-    with pytest.raises(ValueError, match="No 'patch' function defined"):
-        _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
-
-
-def test_generate_website_multi_document_template_file(tmp_path: Path) -> None:
+def testgenerate_website_multi_document_template_file(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "resources.yaml").write_text(
@@ -272,37 +234,37 @@ def test_generate_website_multi_document_template_file(tmp_path: Path) -> None:
         + "apiVersion: v1\nkind: Service\nmetadata:\n  name: simple-svc\n  namespace: staging\n"
     )
     config = WebsiteConfig(
-        name="my-website", namespace="staging", patch=None
+        name="my-website", namespace="staging"
     )
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     names = {p.name for p in paths}
     assert names == {"deployment-my-website.yaml", "service-simple-svc.yaml"}
 
 
-def test_generate_website_empty_templates_dir(tmp_path: Path) -> None:
+def testgenerate_website_empty_templates_dir(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     config = WebsiteConfig(
-        name="my-website", namespace="staging", patch=None
+        name="my-website", namespace="staging"
     )
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     assert paths == set()
 
 
-def test_generate_website_non_yaml_files_ignored(tmp_path: Path) -> None:
+def testgenerate_website_non_yaml_files_ignored(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "deployment.yaml").write_text(SIMPLE_DEPLOYMENT)
     (templates_dir / "notes.txt").write_text("this should be ignored\n")
     (templates_dir / "script.sh").write_text("#!/bin/sh\n")
     config = WebsiteConfig(
-        name="my-website", namespace="staging", patch=None
+        name="my-website", namespace="staging"
     )
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     assert len(paths) == 1
 
 
-def test_generate_website_cluster_scoped_resource(tmp_path: Path) -> None:
+def testgenerate_website_cluster_scoped_resource(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "clusterrole.yaml").write_text(
@@ -313,14 +275,14 @@ def test_generate_website_cluster_scoped_resource(tmp_path: Path) -> None:
         "rules: []\n"
     )
     config = WebsiteConfig(
-        name="my-website", namespace="staging", patch=None
+        name="my-website", namespace="staging"
     )
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     (path,) = paths
     assert path == tmp_path / "output" / "cluster" / "clusterrole-my-role.yaml"
 
 
-def test_generate_website_namespace_fallback(tmp_path: Path) -> None:
+def testgenerate_website_namespace_fallback(tmp_path: Path) -> None:
     """Resources without a namespace in metadata use the config namespace."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -328,9 +290,8 @@ def test_generate_website_namespace_fallback(tmp_path: Path) -> None:
         "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: my-config\ndata: {}\n"
     )
     config = WebsiteConfig(
-        name="my-website", namespace="fallback-ns", patch=None
-    )
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+        name="my-website", namespace="fallback-ns"    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     (path,) = paths
     assert path.parent.name == "fallback-ns"
 
@@ -338,8 +299,7 @@ def test_generate_website_namespace_fallback(tmp_path: Path) -> None:
 def test_generate_manifests_with_website_config(tmp_path: Path) -> None:
     """generate_manifests dispatches to website app generation without needing helm."""
     config = WebsiteConfig(
-        name="zq.lu", namespace="web", patch=None
-    )
+        name="zq.lu", namespace="web"    )
     output_dir = tmp_path / "output"
 
     generate_manifests([config], output_dir, repo_root=tmp_path)
@@ -360,8 +320,7 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
     stale.write_text("stale: true\n")
 
     config = WebsiteConfig(
-        name="zq.lu", namespace="web", patch=None
-    )
+        name="zq.lu", namespace="web"    )
     generate_manifests([config], output_dir, repo_root=tmp_path)
 
     assert not stale.exists()
@@ -369,10 +328,10 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
     assert any(output_dir.rglob("*.yaml"))
 
 
-def test_generate_website_file_content_is_valid_yaml(tmp_path: Path) -> None:
+def testgenerate_website_file_content_is_valid_yaml(tmp_path: Path) -> None:
     """Each output file must be parseable YAML with the correct structure."""
     config, templates_dir = _make_website_config(tmp_path)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
     (path,) = paths
     # skip the leading comment line before parsing
@@ -396,8 +355,8 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
         "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: app\nspec: {}\n"
     )
 
-    config1 = WebsiteConfig(name="app1", namespace="ns1", patch=None)
-    config2 = WebsiteConfig(name="app2", namespace="ns1", patch=None)
+    config1 = WebsiteConfig(name="app1", namespace="ns1")
+    config2 = WebsiteConfig(name="app2", namespace="ns1")
 
     output_dir = tmp_path / "output"
 
@@ -405,7 +364,7 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
     import unittest.mock as mock
 
     with mock.patch(
-        "manifest_builder.generator._generate_website",
+        "manifest_builder.website.generate_website",
         side_effect=[
             {tmp_path / "output" / "ns1" / "deployment-app.yaml"},  # config1 generates this
             {tmp_path / "output" / "ns1" / "deployment-app.yaml"},  # config2 also generates this
@@ -415,7 +374,7 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
             generate_manifests([config1, config2], output_dir, repo_root=tmp_path)
 
 
-def test_generate_website_provides_k8s_name_variable(tmp_path: Path) -> None:
+def testgenerate_website_provides_k8s_name_variable(tmp_path: Path) -> None:
     """Website templates should have k8s_name available (name with periods replaced by dashes)."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -424,8 +383,8 @@ def test_generate_website_provides_k8s_name_variable(tmp_path: Path) -> None:
         "apiVersion: v1\nkind: Service\nmetadata:\n  name: {{k8s_name}}\nspec: {}\n"
     )
 
-    config = WebsiteConfig(name="my.example.com", namespace="production", patch=None)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    config = WebsiteConfig(name="my.example.com", namespace="production")
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -433,7 +392,7 @@ def test_generate_website_provides_k8s_name_variable(tmp_path: Path) -> None:
     assert doc["metadata"]["name"] == "my-example-com"
 
 
-def test_generate_website_renders_handlebars_templates(tmp_path: Path) -> None:
+def testgenerate_website_renders_handlebars_templates(tmp_path: Path) -> None:
     """Website templates should be rendered as Handlebars with the website name available."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -442,8 +401,8 @@ def test_generate_website_renders_handlebars_templates(tmp_path: Path) -> None:
         "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{name}}\nspec: {}\n"
     )
 
-    config = WebsiteConfig(name="my-app", namespace="production", patch=None)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    config = WebsiteConfig(name="my-app", namespace="production")
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -451,7 +410,7 @@ def test_generate_website_renders_handlebars_templates(tmp_path: Path) -> None:
     assert doc["metadata"]["name"] == "my-app"
 
 
-def test_generate_website_adds_namespace_to_namespaced_resources(tmp_path: Path) -> None:
+def testgenerate_website_adds_namespace_to_namespaced_resources(tmp_path: Path) -> None:
     """Namespaced resources should get the namespace from the config."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -464,8 +423,8 @@ def test_generate_website_adds_namespace_to_namespaced_resources(tmp_path: Path)
         "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: test-role\nrules: []\n"
     )
 
-    config = WebsiteConfig(name="test-app", namespace="production", patch=None)
-    paths = _generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    config = WebsiteConfig(name="test-app", namespace="production")
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
     # Check the Deployment got the namespace
     deployment_files = [p for p in paths if "deployment" in p.name]

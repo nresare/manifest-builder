@@ -2,9 +2,7 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Manifest generation orchestration."""
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
 import yaml
 
@@ -35,6 +33,67 @@ CLUSTER_SCOPED_KINDS = {
 }
 
 
+def _generate_helm_manifests(
+    config: ChartConfig,
+    output_dir: Path,
+    charts_dir: Path,
+    verbose: bool = False,
+) -> set[Path]:
+    """Generate manifests from a Helm chart.
+
+    Args:
+        config: Helm chart configuration
+        output_dir: Directory to write generated manifests
+        charts_dir: Directory for caching pulled charts
+        verbose: If True, print detailed output
+
+    Returns:
+        Set of paths written
+    """
+    if verbose:
+        print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
+        print(f"  Chart: {config.chart}")
+        if config.repo:
+            print(f"  Repo: {config.repo}")
+        if config.version:
+            print(f"  Version: {config.version}")
+        if config.values:
+            print(f"  Values: {', '.join(str(v) for v in config.values)}")
+
+    if config.chart is None:
+        raise ValueError(
+            f"Chart '{config.name}' has no resolved chart reference; "
+            "ensure resolve_configs() was called before generate_manifests()"
+        )
+
+    values_paths = config.values
+
+    # Pull the chart from the repo if configured
+    if config.repo:
+        version_suffix = f"-{config.version}" if config.version else ""
+        pull_dest = charts_dir / f"{config.chart}{version_suffix}"
+        if verbose:
+            if (pull_dest / config.chart).exists():
+                print(f"  Using cached chart at {pull_dest / config.chart}")
+            else:
+                print(f"  Pulling chart to {pull_dest / config.chart}")
+        chart_path = str(
+            pull_chart(config.chart, config.repo, pull_dest, config.version)
+        )
+    else:
+        chart_path = config.chart
+
+    manifest_content = run_helm_template(
+        release_name=config.name,
+        chart=chart_path,
+        namespace=config.namespace,
+        values_files=values_paths,
+    )
+    return write_manifests(
+        manifest_content, output_dir, config.namespace, verbose, config.name
+    )
+
+
 def generate_manifests(
     configs: list[ChartConfig | WebsiteConfig],
     output_dir: Path,
@@ -56,6 +115,8 @@ def generate_manifests(
         ValueError: If configuration validation fails
         RuntimeError: If manifest generation fails
     """
+    from manifest_builder.website import generate_website
+
     if not configs:
         print("No charts configured")
         return
@@ -63,66 +124,23 @@ def generate_manifests(
     if charts_dir is None:
         charts_dir = repo_root / ".charts"
 
-    # Validate all configs first
+    # Validate all of the configs first
     for config in configs:
         validate_config(config, repo_root)
 
     # Generate manifests
-    # Maps output paths to the config name that generated them
+    # Map the output paths to the config name that generated them
     written_paths: dict[Path, str] = {}
     for config in configs:
         try:
             if isinstance(config, WebsiteConfig):
                 if verbose:
                     print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
-                    if config.patch:
-                        print(f"  Patch: {config.patch}")
-                paths = _generate_website(config, output_dir, verbose)
+                paths = generate_website(config, output_dir, verbose)
             else:
-                if verbose:
-                    print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
-                    print(f"  Chart: {config.chart}")
-                    if config.repo:
-                        print(f"  Repo: {config.repo}")
-                    if config.version:
-                        print(f"  Version: {config.version}")
-                    if config.values:
-                        print(f"  Values: {', '.join(str(v) for v in config.values)}")
+                paths = _generate_helm_manifests(config, output_dir, charts_dir, verbose)
 
-                if config.chart is None:
-                    raise ValueError(
-                        f"Chart '{config.name}' has no resolved chart reference; "
-                        "ensure resolve_configs() was called before generate_manifests()"
-                    )
-
-                values_paths = config.values
-
-                # Pull chart from repo if configured
-                if config.repo:
-                    version_suffix = f"-{config.version}" if config.version else ""
-                    pull_dest = charts_dir / f"{config.chart}{version_suffix}"
-                    if verbose:
-                        if (pull_dest / config.chart).exists():
-                            print(f"  Using cached chart at {pull_dest / config.chart}")
-                        else:
-                            print(f"  Pulling chart to {pull_dest / config.chart}")
-                    chart_path = str(
-                        pull_chart(config.chart, config.repo, pull_dest, config.version)
-                    )
-                else:
-                    chart_path = config.chart
-
-                manifest_content = run_helm_template(
-                    release_name=config.name,
-                    chart=chart_path,
-                    namespace=config.namespace,
-                    values_files=values_paths,
-                )
-                paths = write_manifests(
-                    manifest_content, output_dir, config.namespace, verbose, config.name
-                )
-
-            # Check for conflicts with previously written files
+            # Check for conflicts with the previously written files
             conflicts = {p: written_paths[p] for p in paths if p in written_paths}
             if conflicts:
                 conflict_details = []
@@ -134,35 +152,70 @@ def generate_manifests(
                     f"generated by another config:\n  {conflict_list}"
                 )
 
-            # Record which config generated these files
+            # Record which config generated the files
             for path in paths:
                 written_paths[path] = config.name
 
             print(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
 
-        except Exception as e:
+        except Exception:
             print(f"✗ {config.name} ({config.namespace})")
             raise
 
-    # Remove any stale files left over from previous runs
-    removed = 0
-    if output_dir.exists():
-        for existing in output_dir.rglob("*.yaml"):
-            if existing not in written_paths:
-                existing.unlink()
-                removed += 1
-                if verbose:
-                    print(f"  removed {existing.relative_to(output_dir)}")
-        # Remove any empty directories
-        for directory in sorted(output_dir.rglob("*"), reverse=True):
-            if directory.is_dir() and not any(directory.iterdir()):
-                directory.rmdir()
+    # Remove any stale files left over from the previous runs
+    _cleanup_stale_files(output_dir, written_paths, verbose)
 
     total = len(written_paths)
     summary = f"\nDone! Generated {total} manifest(s)"
+    removed = _count_removed_files(output_dir, written_paths)
     if removed:
         summary += f", removed {removed} stale file(s)"
     print(summary)
+
+
+def _cleanup_stale_files(
+    output_dir: Path, written_paths: dict[Path, str], verbose: bool = False
+) -> None:
+    """Remove stale files and empty directories from previous runs.
+
+    Args:
+        output_dir: Directory to clean
+        written_paths: Set of paths that were written in this run
+        verbose: If True, print each file removed
+    """
+    if not output_dir.exists():
+        return
+
+    for existing in output_dir.rglob("*.yaml"):
+        if existing not in written_paths:
+            existing.unlink()
+            if verbose:
+                print(f"  removed {existing.relative_to(output_dir)}")
+
+    # Remove any empty directories
+    for directory in sorted(output_dir.rglob("*"), reverse=True):
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+
+
+def _count_removed_files(output_dir: Path, written_paths: dict[Path, str]) -> int:
+    """Count the number of stale files that were removed.
+
+    Args:
+        output_dir: Directory to check
+        written_paths: Set of paths that were written in this run
+
+    Returns:
+        Number of removed files
+    """
+    if not output_dir.exists():
+        return 0
+
+    removed = 0
+    for existing in output_dir.rglob("*.yaml"):
+        if existing not in written_paths:
+            removed += 1
+    return removed
 
 
 def _make_k8s_name(name: str) -> str:
@@ -208,7 +261,7 @@ def _make_k8s_name(name: str) -> str:
             f"but ends with '{k8s_name[-1]}'"
         )
 
-    # Verify only valid characters (lowercase alphanumeric and hyphens)
+    # Verify that only valid characters are present (lowercase alphanumeric and hyphens)
     if not all(c.isalnum() or c == "-" for c in k8s_name):
         invalid_chars = set(c for c in k8s_name if not (c.isalnum() or c == "-"))
         raise ValueError(
@@ -217,73 +270,6 @@ def _make_k8s_name(name: str) -> str:
         )
 
     return k8s_name
-
-
-def _load_patch_module(patch_path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location("_patch", patch_path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"Cannot load patch file: {patch_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    if not hasattr(module, "patch"):
-        raise ValueError(f"No 'patch' function defined in {patch_path}")
-    return module
-
-
-def _generate_website(
-    config: WebsiteConfig,
-    output_dir: Path,
-    verbose: bool = False,
-    _templates_override: Path | None = None,  # for testing only
-) -> set[Path]:
-    """Generate manifests for a website app from bundled Mustache templates."""
-    import pystache
-
-    # Use the bundled website templates from the package (or override for testing)
-    if _templates_override is not None:
-        templates_dir = _templates_override
-    else:
-        from importlib.resources import files as get_package_files
-
-        templates_dir = Path(str(get_package_files("manifest_builder") / "templates" / "web"))
-
-    patch_fn = None
-    if config.patch is not None:
-        patch_fn = _load_patch_module(config.patch).patch
-
-    # Prepare template context with both original name and Kubernetes-safe name
-    context = {
-        "name": config.name,
-        "k8s_name": _make_k8s_name(config.name),
-    }
-
-    docs: list[dict] = []
-    for template_file in sorted(templates_dir.glob("*.yaml")):
-        with open(template_file) as f:
-            template_source = f.read()
-
-        # Render the Mustache template
-        rendered = pystache.render(template_source, context)
-
-        # Parse rendered YAML documents
-        for doc in yaml.safe_load_all(rendered):
-            if doc:
-                docs.append(doc)
-
-    # Add namespace metadata to namespaced resources
-    for doc in docs:
-        kind = doc.get("kind")
-        if kind and kind not in CLUSTER_SCOPED_KINDS:
-            doc.setdefault("metadata", {})["namespace"] = config.namespace
-
-    if patch_fn is not None:
-        patched = []
-        for doc in docs:
-            result = patch_fn(doc)
-            patched.append(result if result is not None else doc)
-        docs = patched
-
-    return _write_documents(docs, output_dir, config.namespace, verbose, config.name)
 
 
 def _strip_helm_from_metadata(metadata: dict) -> None:
