@@ -9,6 +9,17 @@ import yaml
 from manifest_builder.config import ChartConfig, WebsiteConfig, validate_config
 from manifest_builder.helm import pull_chart, run_helm_template
 
+
+def _literal_str_representer(dumper: yaml.Dumper, data: str) -> yaml.Node:
+    """Represent multi-line strings using literal block scalar (|-) syntax."""
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+# Register the custom representer for multi-line strings
+yaml.add_representer(str, _literal_str_representer)
+
 # Kubernetes resource kinds that are cluster-scoped (not namespaced)
 CLUSTER_SCOPED_KINDS = {
     "APIService",
