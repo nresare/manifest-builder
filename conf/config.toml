@@ -28,5 +28,5 @@ name = "id.noa.re"
 namespace = "idelephant"
 image = "nresare/idelephant:latest"
 args = ["-c", "/config/idelephant.toml"]
-[[websites.config]]
-"/etc/idelephant.toml" = "idelephant/idelephant.toml"
+[websites.config]
+"/config/idelephant.toml" = "idelephant/idelephant.toml"
