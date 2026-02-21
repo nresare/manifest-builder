@@ -163,18 +163,18 @@ def generate_website(
                 ] = config.hugo_repo
 
     # Generate ConfigMaps from config files and inject volumes/mounts if configured
-    if config.config_files:
+    if config.config:
         k8s_name = _make_k8s_name(config.name)
-        configmaps = _make_configmaps(k8s_name, config.config_files)
+        configmaps = _make_configmaps(k8s_name, config.config)
         # Inject namespace into ConfigMaps (they're added after the main namespace loop)
         for cm in configmaps:
             cm.setdefault("metadata", {})["namespace"] = config.namespace
         docs.extend(configmaps)
 
-        # Determine mount points from config_files (grouped by top-level directory)
+        # Determine mount points from config (grouped by top-level directory)
         mount_groups = {
             Path(container_path).parts[1]
-            for container_path in config.config_files
+            for container_path in config.config
         }
         for doc in docs:
             if doc.get("kind") == "Deployment":

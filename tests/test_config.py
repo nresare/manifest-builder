@@ -500,8 +500,8 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
     assert resolved == [config]
 
 
-def test_load_website_config_with_config_files(tmp_path: Path) -> None:
-    """Website config can specify config_files with local paths."""
+def test_load_website_config_with_config(tmp_path: Path) -> None:
+    """Website config can specify config with local paths."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
 
@@ -516,7 +516,7 @@ def test_load_website_config_with_config_files(tmp_path: Path) -> None:
 [[websites]]
 name = "my-app"
 namespace = "default"
-config_files = { "/config/app.conf" = "app.conf" }
+config = { "/config/app.conf" = "app.conf" }
 """,
     )
 
@@ -524,11 +524,11 @@ config_files = { "/config/app.conf" = "app.conf" }
     assert len(configs) == 1
     config = configs[0]
     assert isinstance(config, WebsiteConfig)
-    assert config.config_files is not None
-    assert config.config_files["/config/app.conf"] == conf_dir / "app.conf"
+    assert config.config is not None
+    assert config.config["/config/app.conf"] == conf_dir / "app.conf"
 
 
-def test_load_website_config_multiple_config_files(tmp_path: Path) -> None:
+def test_load_website_config_multiple_config(tmp_path: Path) -> None:
     """Website config can specify multiple config files in different directories."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
@@ -544,15 +544,15 @@ def test_load_website_config_multiple_config_files(tmp_path: Path) -> None:
 [[websites]]
 name = "my-app"
 namespace = "default"
-config_files = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
+config = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
 """,
     )
 
     configs = load_configs(conf_dir)
     config = configs[0]
-    assert len(config.config_files) == 2
-    assert config.config_files["/config/app.conf"] == conf_dir / "app.conf"
-    assert config.config_files["/etc/db.yaml"] == conf_dir / "db.yaml"
+    assert len(config.config) == 2
+    assert config.config["/config/app.conf"] == conf_dir / "app.conf"
+    assert config.config["/etc/db.yaml"] == conf_dir / "db.yaml"
 
 
 def test_validate_config_missing_config_file(tmp_path: Path) -> None:
@@ -560,7 +560,7 @@ def test_validate_config_missing_config_file(tmp_path: Path) -> None:
     config = WebsiteConfig(
         name="my-app",
         namespace="default",
-        config_files={"/config/app.toml": tmp_path / "nonexistent.toml"},
+        config={"/config/app.toml": tmp_path / "nonexistent.toml"},
     )
     with pytest.raises(ValueError, match="Config file not found"):
         validate_config(config, tmp_path)

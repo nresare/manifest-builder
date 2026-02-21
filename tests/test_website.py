@@ -542,7 +542,7 @@ def test_generate_website_injects_hugo_fragments(tmp_path: Path) -> None:
 
 
 def test_generate_website_emits_configmap(tmp_path: Path) -> None:
-    """ConfigMap should be generated from config_files."""
+    """ConfigMap should be generated from config."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
 
@@ -559,7 +559,7 @@ def test_generate_website_emits_configmap(tmp_path: Path) -> None:
         name="my-app",
         namespace="production",
         image="myapp:1.0",
-        config_files={"/config/app.toml": config_file},
+        config={"/config/app.toml": config_file},
     )
     paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
@@ -596,7 +596,7 @@ def test_generate_website_configmap_groups_by_top_level_dir(tmp_path: Path) -> N
         name="my-app",
         namespace="production",
         image="myapp:1.0",
-        config_files={
+        config={
             "/config/app.toml": config_file1,
             "/etc/db.conf": config_file2,
         },
@@ -628,7 +628,7 @@ def test_generate_website_configmap_same_dir_merged(tmp_path: Path) -> None:
         name="my-app",
         namespace="production",
         image="myapp:1.0",
-        config_files={
+        config={
             "/config/app.toml": config_file1,
             "/config/other.toml": config_file2,
         },
@@ -660,7 +660,7 @@ def test_generate_website_injects_volume_and_mount(tmp_path: Path) -> None:
         name="my-app",
         namespace="production",
         image="myapp:1.0",
-        config_files={"/config/app.toml": config_file},
+        config={"/config/app.toml": config_file},
     )
     paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
 
@@ -677,8 +677,8 @@ def test_generate_website_injects_volume_and_mount(tmp_path: Path) -> None:
     assert any(m["name"] == "my-app-config" and m["mountPath"] == "/config" for m in mounts)
 
 
-def test_generate_website_no_config_files_no_configmap(tmp_path: Path) -> None:
-    """Website without config_files should not generate ConfigMaps."""
+def test_generate_website_no_config_no_configmap(tmp_path: Path) -> None:
+    """Website without config should not generate ConfigMaps."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
 

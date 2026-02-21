@@ -32,7 +32,7 @@ class WebsiteConfig:
     hugo_repo: str | None = None
     image: str | None = None
     args: str | list[str] | None = None
-    config_files: dict[str, Path] | None = None  # container path -> resolved local path
+    config: dict[str, Path] | None = None  # container path -> resolved local path
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
@@ -132,13 +132,13 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
             f"Cannot specify both 'hugo_repo' and 'image' in {source_file}"
         )
 
-    # Parse config_files: resolve local paths relative to the TOML file's directory
+    # Parse config: resolve local paths relative to the TOML file's directory
     config_dir = source_file.parent
-    config_files = None
-    if "config_files" in data:
-        config_files = {
+    config_dict = None
+    if "config" in data:
+        config_dict = {
             container_path: config_dir / local_path
-            for container_path, local_path in data["config_files"].items()
+            for container_path, local_path in data["config"].items()
         }
 
     return WebsiteConfig(
@@ -147,7 +147,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         hugo_repo=hugo_repo,
         image=image,
         args=data.get("args"),
-        config_files=config_files,
+        config=config_dict,
     )
 
 
@@ -234,7 +234,7 @@ def validate_config(config: ChartConfig | WebsiteConfig, repo_root: Path) -> Non
         ValueError: If validation fails
     """
     if isinstance(config, WebsiteConfig):
-        for container_path, local_path in (config.config_files or {}).items():
+        for container_path, local_path in (config.config or {}).items():
             if not local_path.exists():
                 raise ValueError(
                     f"Config file not found for '{config.name}': {local_path} "
