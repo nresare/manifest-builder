@@ -6,6 +6,11 @@ namespace = "cert-manager"
 release = "cert-manager"
 values = ["cert-manager/values.yaml"]
 
+[[helms]]
+namespace = "surrealdb"
+release = "surrealdb"
+values = ["surrealdb/values.yaml"]
+
 # Example with a direct chart reference (no helmfile.yaml entry needed):
 # [[helms]]
 # name = "myapp"
