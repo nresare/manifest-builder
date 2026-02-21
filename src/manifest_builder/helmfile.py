@@ -11,7 +11,6 @@ import yaml
 @dataclass
 class HelmfileRepository:
     """A Helm chart repository."""
-
     name: str
     url: str
 
@@ -19,7 +18,6 @@ class HelmfileRepository:
 @dataclass
 class HelmfileRelease:
     """A release entry from helmfile.yaml."""
-
     name: str
     chart: str  # "reponame/chartname" format
     version: str | None
@@ -29,7 +27,6 @@ class HelmfileRelease:
 @dataclass
 class Helmfile:
     """Parsed helmfile.yaml content."""
-
     repositories: list[HelmfileRepository]
     releases: list[HelmfileRelease]
 

@@ -4,6 +4,7 @@
 
 import tomllib
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 
 from manifest_builder.helmfile import Helmfile
@@ -22,18 +23,29 @@ class ChartConfig:
     release: str | None  # helmfile release name; None for direct chart entries
 
 
-def load_configs(config_dir: Path) -> list[ChartConfig]:
+@dataclass
+class WebsiteConfig:
+    """Configuration for a website app built from bundled YAML templates."""
+
+    name: str
+    namespace: str
+    patch: Path | None  # optional Python file defining patch(document)
+
+
+def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
     """
-    Load all chart configurations from TOML files in the config directory.
+    Load all app configurations from TOML files in the config directory.
+
+    Each TOML file may contain [[helms]] and [[websites]] tables.
 
     Args:
         config_dir: Directory containing TOML configuration files
 
     Returns:
-        List of ChartConfig objects
+        List of app config objects
 
     Raises:
-        FileNotFoundError: If config_dir doesn't exist
+        FileNotFoundError: If config_dir doesn't exist or contains no TOML files
         ValueError: If TOML is invalid or missing required fields
     """
     if not config_dir.exists():
@@ -42,7 +54,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig]:
     if not config_dir.is_dir():
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
-    configs: list[ChartConfig] = []
+    configs: list[ChartConfig | WebsiteConfig] = []
     toml_files = list(config_dir.rglob("*.toml"))
 
     if not toml_files:
@@ -52,23 +64,20 @@ def load_configs(config_dir: Path) -> list[ChartConfig]:
         with open(toml_file, "rb") as f:
             data = tomllib.load(f)
 
-        if "app" not in data:
-            raise ValueError(f"No [[app]] entries found in {toml_file}")
+        if "helms" not in data and "websites" not in data:
+            raise ValueError(f"No [[helms]] or [[websites]] entries found in {toml_file}")
 
-        for app_data in data["app"]:
-            app_type = app_data.get("type")
-            if app_type is None:
-                raise ValueError(f"Missing required field 'type' in {toml_file}")
-            if app_type == "helm":
-                configs.append(_parse_chart_config(app_data, toml_file))
-            else:
-                raise ValueError(f"Unknown app type '{app_type}' in {toml_file}")
+        for helm_data in data.get("helms", []):
+            configs.append(_parse_chart_config(helm_data, toml_file))
+
+        for website_data in data.get("websites", []):
+            configs.append(_parse_website_config(website_data, toml_file))
 
     return configs
 
 
 def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
-    """Parse a single chart configuration from TOML data."""
+    """Parse a single helm chart configuration from TOML data."""
     has_release = "release" in data
     has_chart = "chart" in data
 
@@ -106,16 +115,36 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
         )
 
 
+def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
+    """Parse a website app configuration from TOML data."""
+    for field in ("name", "namespace"):
+        if field not in data:
+            raise ValueError(f"Missing required field '{field}' in {source_file}")
+
+    patch_path = None
+    if "patch" in data:
+        # Patch files are in the package
+        patch_name = data["patch"]
+        package_patch = Path(str(files("manifest_builder") / "templates" / patch_name))
+        patch_path = package_patch
+
+    return WebsiteConfig(
+        name=data["name"],
+        namespace=data["namespace"],
+        patch=patch_path,
+    )
+
+
 def resolve_configs(
-    configs: list[ChartConfig], helmfile: Helmfile | None
-) -> list[ChartConfig]:
+    configs: list[ChartConfig | WebsiteConfig], helmfile: Helmfile | None
+) -> list[ChartConfig | WebsiteConfig]:
     """
     Resolve helmfile release references, filling in chart/repo/version.
 
     Configs without a release reference are returned unchanged.
 
     Args:
-        configs: Chart configs as parsed from TOML
+        configs: App configs as parsed from TOML
         helmfile: Parsed helmfile.yaml, or None if not present
 
     Returns:
@@ -124,11 +153,11 @@ def resolve_configs(
     Raises:
         ValueError: If a release reference cannot be resolved
     """
-    if not any(c.release for c in configs):
+    if not any(isinstance(c, ChartConfig) and c.release for c in configs):
         return configs
 
     if helmfile is None:
-        names = [c.name for c in configs if c.release]
+        names = [c.name for c in configs if isinstance(c, ChartConfig) and c.release]
         raise ValueError(
             f"Charts {names} reference helmfile releases but no helmfile.yaml was found"
         )
@@ -136,9 +165,9 @@ def resolve_configs(
     repo_by_name = {r.name: r.url for r in helmfile.repositories}
     release_by_name = {r.name: r for r in helmfile.releases}
 
-    resolved: list[ChartConfig] = []
+    resolved: list[ChartConfig | WebsiteConfig] = []
     for config in configs:
-        if config.release is None:
+        if not isinstance(config, ChartConfig) or config.release is None:
             resolved.append(config)
             continue
 
@@ -177,17 +206,24 @@ def resolve_configs(
     return resolved
 
 
-def validate_config(config: ChartConfig, repo_root: Path) -> None:
+def validate_config(config: ChartConfig | WebsiteConfig, repo_root: Path) -> None:
     """
-    Validate a chart configuration.
+    Validate an app configuration.
 
     Args:
-        config: Chart configuration to validate
+        config: App configuration to validate
         repo_root: Repository root directory for resolving relative paths
 
     Raises:
         ValueError: If validation fails
     """
+    if isinstance(config, WebsiteConfig):
+        if config.patch is not None and not config.patch.exists():
+            raise ValueError(
+                f"Patch file not found for '{config.name}': {config.patch}"
+            )
+        return
+
     for values_path in config.values:
         if not values_path.exists():
             raise ValueError(

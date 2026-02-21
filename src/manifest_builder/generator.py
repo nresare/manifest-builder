@@ -2,11 +2,13 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Manifest generation orchestration."""
 
+import importlib.util
 from pathlib import Path
+from types import ModuleType
 
 import yaml
 
-from manifest_builder.config import ChartConfig, validate_config
+from manifest_builder.config import ChartConfig, WebsiteConfig, validate_config
 from manifest_builder.helm import pull_chart, run_helm_template
 
 # Kubernetes resource kinds that are cluster-scoped (not namespaced)
@@ -34,17 +36,17 @@ CLUSTER_SCOPED_KINDS = {
 
 
 def generate_manifests(
-    configs: list[ChartConfig],
+    configs: list[ChartConfig | WebsiteConfig],
     output_dir: Path,
     repo_root: Path,
     charts_dir: Path | None = None,
     verbose: bool = False,
 ) -> None:
     """
-    Generate manifests for all configured charts.
+    Generate manifests for all configured apps.
 
     Args:
-        configs: List of chart configurations
+        configs: List of app configurations
         output_dir: Directory to write generated manifests
         repo_root: Repository root for resolving relative paths
         charts_dir: Directory for caching pulled charts (default: repo_root/.charts)
@@ -66,60 +68,80 @@ def generate_manifests(
         validate_config(config, repo_root)
 
     # Generate manifests
-    written_paths: set[Path] = set()
+    # Maps output paths to the config name that generated them
+    written_paths: dict[Path, str] = {}
     for config in configs:
-        if verbose:
-            print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
-            print(f"  Chart: {config.chart}")
-            if config.repo:
-                print(f"  Repo: {config.repo}")
-            if config.version:
-                print(f"  Version: {config.version}")
-            if config.values:
-                print(f"  Values: {', '.join(str(v) for v in config.values)}")
-
-        if config.chart is None:
-            raise ValueError(
-                f"Chart '{config.name}' has no resolved chart reference; "
-                "ensure resolve_configs() was called before generate_manifests()"
-            )
-
-        values_paths = config.values
-
-        # Pull chart from repo if configured
-        if config.repo:
-            version_suffix = f"-{config.version}" if config.version else ""
-            pull_dest = charts_dir / f"{config.chart}{version_suffix}"
-            if verbose:
-                if (pull_dest / config.chart).exists():
-                    print(f"  Using cached chart at {pull_dest / config.chart}")
-                else:
-                    print(f"  Pulling chart to {pull_dest / config.chart}")
-            chart_path = str(
-                pull_chart(config.chart, config.repo, pull_dest, config.version)
-            )
-        else:
-            chart_path = config.chart
-
-        # Generate manifest
         try:
-            manifest_content = run_helm_template(
-                release_name=config.name,
-                chart=chart_path,
-                namespace=config.namespace,
-                values_files=values_paths,
-            )
+            if isinstance(config, WebsiteConfig):
+                if verbose:
+                    print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
+                    if config.patch:
+                        print(f"  Patch: {config.patch}")
+                paths = _generate_website(config, output_dir, verbose)
+            else:
+                if verbose:
+                    print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
+                    print(f"  Chart: {config.chart}")
+                    if config.repo:
+                        print(f"  Repo: {config.repo}")
+                    if config.version:
+                        print(f"  Version: {config.version}")
+                    if config.values:
+                        print(f"  Values: {', '.join(str(v) for v in config.values)}")
 
-            # Split and write manifests to individual files
-            paths = write_manifests(
-                manifest_content, output_dir, config.namespace, verbose
-            )
-            written_paths.update(paths)
+                if config.chart is None:
+                    raise ValueError(
+                        f"Chart '{config.name}' has no resolved chart reference; "
+                        "ensure resolve_configs() was called before generate_manifests()"
+                    )
+
+                values_paths = config.values
+
+                # Pull chart from repo if configured
+                if config.repo:
+                    version_suffix = f"-{config.version}" if config.version else ""
+                    pull_dest = charts_dir / f"{config.chart}{version_suffix}"
+                    if verbose:
+                        if (pull_dest / config.chart).exists():
+                            print(f"  Using cached chart at {pull_dest / config.chart}")
+                        else:
+                            print(f"  Pulling chart to {pull_dest / config.chart}")
+                    chart_path = str(
+                        pull_chart(config.chart, config.repo, pull_dest, config.version)
+                    )
+                else:
+                    chart_path = config.chart
+
+                manifest_content = run_helm_template(
+                    release_name=config.name,
+                    chart=chart_path,
+                    namespace=config.namespace,
+                    values_files=values_paths,
+                )
+                paths = write_manifests(
+                    manifest_content, output_dir, config.namespace, verbose, config.name
+                )
+
+            # Check for conflicts with previously written files
+            conflicts = {p: written_paths[p] for p in paths if p in written_paths}
+            if conflicts:
+                conflict_details = []
+                for path, previous_config in sorted(conflicts.items()):
+                    conflict_details.append(f"{path} (generated by {previous_config})")
+                conflict_list = "\n  ".join(conflict_details)
+                raise ValueError(
+                    f"Configuration conflict: {config.name} generates files that are already "
+                    f"generated by another config:\n  {conflict_list}"
+                )
+
+            # Record which config generated these files
+            for path in paths:
+                written_paths[path] = config.name
 
             print(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
 
         except Exception as e:
-            print(f"✗ {config.name} ({config.namespace}): {e}")
+            print(f"✗ {config.name} ({config.namespace})")
             raise
 
     # Remove any stale files left over from previous runs
@@ -141,6 +163,127 @@ def generate_manifests(
     if removed:
         summary += f", removed {removed} stale file(s)"
     print(summary)
+
+
+def _make_k8s_name(name: str) -> str:
+    """Convert a name to a Kubernetes-safe name by replacing periods with dashes.
+
+    Kubernetes object names must conform to RFC 1035 label naming rules:
+    - Must be 63 characters or less
+    - Must begin with an alphanumeric character
+    - Must end with an alphanumeric character
+    - May contain only lowercase alphanumerics or hyphens
+
+    This converts names like 'example.com' to 'example-com'.
+
+    Args:
+        name: The original name (e.g., a domain name)
+
+    Returns:
+        A Kubernetes-safe name with periods replaced by dashes
+
+    Raises:
+        ValueError: If the resulting name violates RFC 1035 label naming constraints
+    """
+    k8s_name = name.replace(".", "-").lower()
+
+    # Validate against RFC 1035 label naming constraints
+    if not k8s_name:
+        raise ValueError(f"Name '{name}' results in an empty Kubernetes object name")
+
+    if len(k8s_name) > 63:
+        raise ValueError(
+            f"Kubernetes name '{k8s_name}' exceeds 63 character limit ({len(k8s_name)} characters)"
+        )
+
+    if not k8s_name[0].isalnum():
+        raise ValueError(
+            f"Kubernetes name '{k8s_name}' must start with an alphanumeric character, "
+            f"but starts with '{k8s_name[0]}'"
+        )
+
+    if not k8s_name[-1].isalnum():
+        raise ValueError(
+            f"Kubernetes name '{k8s_name}' must end with an alphanumeric character, "
+            f"but ends with '{k8s_name[-1]}'"
+        )
+
+    # Verify only valid characters (lowercase alphanumeric and hyphens)
+    if not all(c.isalnum() or c == "-" for c in k8s_name):
+        invalid_chars = set(c for c in k8s_name if not (c.isalnum() or c == "-"))
+        raise ValueError(
+            f"Kubernetes name '{k8s_name}' contains invalid characters: {invalid_chars}. "
+            f"Only lowercase alphanumerics and hyphens are allowed."
+        )
+
+    return k8s_name
+
+
+def _load_patch_module(patch_path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location("_patch", patch_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Cannot load patch file: {patch_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    if not hasattr(module, "patch"):
+        raise ValueError(f"No 'patch' function defined in {patch_path}")
+    return module
+
+
+def _generate_website(
+    config: WebsiteConfig,
+    output_dir: Path,
+    verbose: bool = False,
+    _templates_override: Path | None = None,  # for testing only
+) -> set[Path]:
+    """Generate manifests for a website app from bundled Mustache templates."""
+    import pystache
+
+    # Use the bundled website templates from the package (or override for testing)
+    if _templates_override is not None:
+        templates_dir = _templates_override
+    else:
+        from importlib.resources import files as get_package_files
+
+        templates_dir = Path(str(get_package_files("manifest_builder") / "templates" / "web"))
+
+    patch_fn = None
+    if config.patch is not None:
+        patch_fn = _load_patch_module(config.patch).patch
+
+    # Prepare template context with both original name and Kubernetes-safe name
+    context = {
+        "name": config.name,
+        "k8s_name": _make_k8s_name(config.name),
+    }
+
+    docs: list[dict] = []
+    for template_file in sorted(templates_dir.glob("*.yaml")):
+        with open(template_file) as f:
+            template_source = f.read()
+
+        # Render the Mustache template
+        rendered = pystache.render(template_source, context)
+
+        # Parse rendered YAML documents
+        for doc in yaml.safe_load_all(rendered):
+            if doc:
+                docs.append(doc)
+
+    # Add namespace metadata to namespaced resources
+    for doc in docs:
+        kind = doc.get("kind")
+        if kind and kind not in CLUSTER_SCOPED_KINDS:
+            doc.setdefault("metadata", {})["namespace"] = config.namespace
+
+    if patch_fn is not None:
+        patched = []
+        for doc in docs:
+            result = patch_fn(doc)
+            patched.append(result if result is not None else doc)
+        docs = patched
+
+    return _write_documents(docs, output_dir, config.namespace, verbose, config.name)
 
 
 def _strip_helm_from_metadata(metadata: dict) -> None:
@@ -165,30 +308,13 @@ def strip_helm_metadata(doc: dict) -> dict:
     return doc
 
 
-def write_manifests(
-    content: str, output_dir: Path, namespace: str, verbose: bool = False
+def _write_documents(
+    documents: list[dict],
+    output_dir: Path,
+    namespace: str,
+    verbose: bool = False,
+    app_name: str | None = None,
 ) -> set[Path]:
-    """
-    Split YAML content into individual documents and write each to a separate file.
-
-    Files are named following the pattern: kind-name.yaml, written into
-    output_dir/<namespace>/ for namespaced resources or output_dir/cluster/
-    for cluster-scoped resources.
-
-    Args:
-        content: YAML manifest content with multiple documents
-        output_dir: Base output directory
-        namespace: Kubernetes namespace (used for namespaced resources)
-        verbose: If True, print each file written
-
-    Returns:
-        Set of paths written
-
-    Raises:
-        OSError: If files cannot be written
-    """
-    documents = [doc for doc in yaml.safe_load_all(content) if doc]
-
     written: set[Path] = set()
     for doc in documents:
         strip_helm_metadata(doc)
@@ -209,6 +335,8 @@ def write_manifests(
         output_path = dest_dir / filename
 
         with open(output_path, "w") as f:
+            if app_name:
+                f.write(f"# Source: {app_name}\n")
             yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
 
         if verbose:
@@ -217,3 +345,34 @@ def write_manifests(
         written.add(output_path)
 
     return written
+
+
+def write_manifests(
+    content: str,
+    output_dir: Path,
+    namespace: str,
+    verbose: bool = False,
+    app_name: str | None = None,
+) -> set[Path]:
+    """
+    Split YAML content into individual documents and write each to a separate file.
+
+    Files are named following the pattern: kind-name.yaml, written into
+    output_dir/<namespace>/ for namespaced resources or output_dir/cluster/
+    for cluster-scoped resources.
+
+    Args:
+        content: YAML manifest content with multiple documents
+        output_dir: Base output directory
+        namespace: Kubernetes namespace (used for namespaced resources)
+        verbose: If True, print each file written
+        app_name: If provided, written as a comment at the top of each file
+
+    Returns:
+        Set of paths written
+
+    Raises:
+        OSError: If files cannot be written
+    """
+    documents = [doc for doc in yaml.safe_load_all(content) if doc]
+    return _write_documents(documents, output_dir, namespace, verbose, app_name)

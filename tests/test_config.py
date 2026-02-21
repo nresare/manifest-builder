@@ -9,6 +9,7 @@ import pytest
 
 from manifest_builder.config import (
     ChartConfig,
+    WebsiteConfig,
     load_configs,
     resolve_configs,
     validate_config,
@@ -35,8 +36,7 @@ def test_values_resolved_relative_to_config_dir(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[app]]
-        type = "helm"
+        [[helms]]
         namespace = "default"
         chart = "./charts/myapp"
         name = "myapp"
@@ -61,8 +61,7 @@ def test_values_resolved_relative_to_custom_config_dir(tmp_path: Path) -> None:
             conf_dir,
             "config.toml",
             """\
-            [[app]]
-            type = "helm"
+            [[helms]]
             namespace = "default"
             chart = "./charts/myapp"
             name = "myapp"
@@ -85,8 +84,7 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[app]]
-        type = "helm"
+        [[helms]]
         namespace = "default"
         chart = "./charts/myapp"
         name = "myapp"
@@ -163,37 +161,18 @@ def test_load_configs_no_toml_files(tmp_path: Path) -> None:
         load_configs(conf)
 
 
-def test_load_configs_missing_type_field(tmp_path: Path) -> None:
+def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
     conf = tmp_path / "conf"
     conf.mkdir()
     write_toml(
         conf,
         "config.toml",
         """\
-        [[app]]
-        namespace = "default"
-        chart = "./charts/myapp"
-        name = "myapp"
+        [metadata]
+        description = "this file has no [[helms]] or [[websites]]"
         """,
     )
-    with pytest.raises(ValueError, match="Missing required field 'type'"):
-        load_configs(conf)
-
-
-def test_load_configs_unknown_type(tmp_path: Path) -> None:
-    conf = tmp_path / "conf"
-    conf.mkdir()
-    write_toml(
-        conf,
-        "config.toml",
-        """\
-        [[app]]
-        type = "kustomize"
-        namespace = "default"
-        name = "myapp"
-        """,
-    )
-    with pytest.raises(ValueError, match="Unknown app type"):
+    with pytest.raises(ValueError, match="No \\[\\[helms\\]\\] or \\[\\[websites\\]\\]"):
         load_configs(conf)
 
 
@@ -204,8 +183,7 @@ def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:
         conf,
         "config.toml",
         """\
-        [[app]]
-        type = "helm"
+        [[helms]]
         namespace = "default"
         name = "myapp"
         chart = "./charts/myapp"
@@ -223,8 +201,7 @@ def test_load_configs_neither_release_nor_chart_raises(tmp_path: Path) -> None:
         conf,
         "config.toml",
         """\
-        [[app]]
-        type = "helm"
+        [[helms]]
         namespace = "default"
         name = "myapp"
         """,
@@ -240,8 +217,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
         conf,
         "a.toml",
         """\
-        [[app]]
-        type = "helm"
+        [[helms]]
         namespace = "ns-a"
         chart = "./charts/a"
         name = "app-a"
@@ -251,8 +227,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
         conf,
         "b.toml",
         """\
-        [[app]]
-        type = "helm"
+        [[helms]]
         namespace = "ns-b"
         chart = "./charts/b"
         name = "app-b"
@@ -262,6 +237,30 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
     configs = load_configs(conf)
     names = {c.name for c in configs}
     assert names == {"app-a", "app-b"}
+
+
+def test_load_configs_mixed_helms_and_websites(tmp_path: Path) -> None:
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[helms]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "my-helm-app"
+
+        [[websites]]
+        name = "my-website"
+        namespace = "web"
+        """,
+    )
+
+    configs = load_configs(conf)
+    assert len(configs) == 2
+    assert isinstance(configs[0], ChartConfig)
+    assert isinstance(configs[1], WebsiteConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +329,100 @@ def test_resolve_configs_unknown_release_raises() -> None:
     )
     with pytest.raises(ValueError, match="not found in helmfile.yaml"):
         resolve_configs([config], _make_helmfile())
+
+
+# ---------------------------------------------------------------------------
+# WebsiteConfig parsing
+# ---------------------------------------------------------------------------
+
+
+def test_load_website_config(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "production"
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.name == "my-website"
+    assert config.namespace == "production"
+    # Website templates are hardcoded to the bundled web templates
+    assert config.patch is None
+
+
+def test_load_website_config_with_patch(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        name = "my-website"
+        namespace = "default"
+        patch = "patch.py"
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    # Patch files are resolved relative to the package
+    assert "manifest_builder" in str(configs[0].patch)  # type: ignore[union-attr]
+    assert "patch.py" in str(configs[0].patch)  # type: ignore[union-attr]
+
+
+def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[websites]]
+        namespace = "default"
+        """,
+    )
+    with pytest.raises(ValueError, match="Missing required field 'name'"):
+        load_configs(conf_dir)
+
+
+def test_validate_website_config_missing_patch_file(tmp_path: Path) -> None:
+    config = WebsiteConfig(
+        name="my-website",
+        namespace="default",
+        patch=tmp_path / "nonexistent.py",
+    )
+    with pytest.raises(ValueError, match="Patch file not found"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_website_config_valid(tmp_path: Path) -> None:
+    patch_file = tmp_path / "patch.py"
+    patch_file.write_text("def patch(doc): pass\n")
+    config = WebsiteConfig(
+        name="my-website",
+        namespace="default",
+        patch=patch_file,
+    )
+    validate_config(config, tmp_path)  # should not raise
+
+
+def test_resolve_configs_passes_website_config_through() -> None:
+    config = WebsiteConfig(
+        name="my-website",
+        namespace="default",
+        patch=None,
+    )
+    resolved = resolve_configs([config], None)
+    assert resolved == [config]
 
 
 def test_resolve_configs_passthrough_for_direct_chart() -> None:

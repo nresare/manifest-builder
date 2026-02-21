@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{k8s_name}}
+  labels:
+    app: {{k8s_name}}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: {{k8s_name}}
+  template:
+    metadata:
+      labels:
+        app: {{k8s_name}}
+    spec:
+      containers:
+        - name: web
+          # image: ghcr.io/static-web-server/static-web-server:2-debian
+          image: ghcr.io/static-web-server/static-web-server:2.36.1
+          volumeMounts:
+            - mountPath: /public
+              name: public
+              readOnly: true
+      initContainers:
+        - name: git
+          image: alpine/git:2.47.2
+          command:
+          - /bin/sh
+          - -c
+          - >-
+            if [ ! -d /src/.git ]; then
+              git clone https://github.com/nresare/{{name}} --recurse-submodules --depth=1 /src
+            else
+              git pull --recurse-submodules
+            fi
+          volumeMounts:
+            - mountPath: /src
+              name: src
+        - name: hugo
+          image: floryn90/hugo:0.155.3-alpine
+          volumeMounts:
+            - mountPath: /src
+              name: src
+            - mountPath: /src/public
+              name: public
+      volumes:
+        - name: src
+          emptyDir: {}
+        - name: public
+          emptyDir: {}

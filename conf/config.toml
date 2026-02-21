@@ -1,16 +1,22 @@
 # App configurations reference releases defined in helmfile.yaml.
 # The release provides the chart source (repo, chart name, version).
 
-[[app]]
-type = "helm"
+[[helms]]
 namespace = "cert-manager"
 release = "cert-manager"
 values = ["cert-manager/values.yaml"]
 
 # Example with a direct chart reference (no helmfile.yaml entry needed):
-# [[app]]
-# type = "helm"
+# [[helms]]
 # name = "myapp"
 # namespace = "default"
 # chart = "./charts/myapp"
 # values = ["values/myapp/base.yaml", "values/myapp/prod.yaml"]
+
+[[websites]]
+name = "zq.lu"
+namespace = "web"
+
+[[websites]]
+name = "noa.re"
+namespace = "web"
