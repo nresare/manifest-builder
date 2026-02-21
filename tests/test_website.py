@@ -539,3 +539,160 @@ def test_generate_website_injects_hugo_fragments(tmp_path: Path) -> None:
 
     # Verify hugo annotation was added
     assert doc["metadata"]["annotations"]["hugo"] == "https://github.com/user/my-website"
+
+
+def test_generate_website_emits_configmap(tmp_path: Path) -> None:
+    """ConfigMap should be generated from config_files."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    # Create a simple deployment template
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    # Create a config file
+    config_file = tmp_path / "app.toml"
+    config_file.write_text("[app]\ndebug = true\n")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config_files={"/config/app.toml": config_file},
+    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # Should have 2 files: deployment + configmap
+    assert len(paths) == 2
+    filenames = {p.name for p in paths}
+    assert "deployment-my-app.yaml" in filenames
+    assert "configmap-my-app-config.yaml" in filenames
+
+    # Check ConfigMap content
+    configmap_path = next(p for p in paths if "configmap" in p.name)
+    configmap_doc = yaml.safe_load(configmap_path.read_text())
+    assert configmap_doc["kind"] == "ConfigMap"
+    assert configmap_doc["metadata"]["name"] == "my-app-config"
+    assert configmap_doc["metadata"]["namespace"] == "production"
+    assert configmap_doc["data"]["app.toml"] == "[app]\ndebug = true\n"
+
+
+def test_generate_website_configmap_groups_by_top_level_dir(tmp_path: Path) -> None:
+    """Multiple config files in different directories should create separate ConfigMaps."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config_file1 = tmp_path / "app.toml"
+    config_file1.write_text("app config")
+    config_file2 = tmp_path / "db.conf"
+    config_file2.write_text("db config")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config_files={
+            "/config/app.toml": config_file1,
+            "/etc/db.conf": config_file2,
+        },
+    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # Should have 3 files: deployment + 2 configmaps
+    assert len(paths) == 3
+    configmap_names = {p.stem for p in paths if "configmap" in p.name}
+    assert "configmap-my-app-config" in configmap_names
+    assert "configmap-my-app-etc" in configmap_names
+
+
+def test_generate_website_configmap_same_dir_merged(tmp_path: Path) -> None:
+    """Multiple config files in the same directory should merge into one ConfigMap."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config_file1 = tmp_path / "app.toml"
+    config_file1.write_text("app config")
+    config_file2 = tmp_path / "other.toml"
+    config_file2.write_text("other config")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config_files={
+            "/config/app.toml": config_file1,
+            "/config/other.toml": config_file2,
+        },
+    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # Should have 2 files: deployment + 1 configmap
+    assert len(paths) == 2
+    configmap_path = next(p for p in paths if "configmap" in p.name)
+    configmap_doc = yaml.safe_load(configmap_path.read_text())
+    assert len(configmap_doc["data"]) == 2
+    assert "app.toml" in configmap_doc["data"]
+    assert "other.toml" in configmap_doc["data"]
+
+
+def test_generate_website_injects_volume_and_mount(tmp_path: Path) -> None:
+    """ConfigMap volumes and mounts should be injected into Deployment."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config_file = tmp_path / "app.toml"
+    config_file.write_text("app config")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config_files={"/config/app.toml": config_file},
+    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    # Check volume is present
+    volumes = deployment_doc["spec"]["template"]["spec"]["volumes"]
+    assert any(v["name"] == "my-app-config" and v.get("configMap", {}).get("name") == "my-app-config" for v in volumes)
+
+    # Check volumeMount is present in container
+    containers = deployment_doc["spec"]["template"]["spec"]["containers"]
+    mounts = containers[0]["volumeMounts"]
+    assert any(m["name"] == "my-app-config" and m["mountPath"] == "/config" for m in mounts)
+
+
+def test_generate_website_no_config_files_no_configmap(tmp_path: Path) -> None:
+    """Website without config_files should not generate ConfigMaps."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+    )
+    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+
+    # Should have only deployment, no configmap
+    assert len(paths) == 1
+    assert "deployment" in next(iter(paths)).name

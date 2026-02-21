@@ -498,3 +498,69 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
     )
     resolved = resolve_configs([config], None)
     assert resolved == [config]
+
+
+def test_load_website_config_with_config_files(tmp_path: Path) -> None:
+    """Website config can specify config_files with local paths."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+
+    # Create config files in the conf directory (not with .toml extension to avoid glob)
+    config_file = conf_dir / "app.conf"
+    config_file.write_text("[app]\nkey = value\n")
+
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+[[websites]]
+name = "my-app"
+namespace = "default"
+config_files = { "/config/app.conf" = "app.conf" }
+""",
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.config_files is not None
+    assert config.config_files["/config/app.conf"] == conf_dir / "app.conf"
+
+
+def test_load_website_config_multiple_config_files(tmp_path: Path) -> None:
+    """Website config can specify multiple config files in different directories."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+
+    # Create config files (use .conf and .yaml to avoid .toml glob)
+    (conf_dir / "app.conf").write_text("app")
+    (conf_dir / "db.yaml").write_text("db")
+
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+[[websites]]
+name = "my-app"
+namespace = "default"
+config_files = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
+""",
+    )
+
+    configs = load_configs(conf_dir)
+    config = configs[0]
+    assert len(config.config_files) == 2
+    assert config.config_files["/config/app.conf"] == conf_dir / "app.conf"
+    assert config.config_files["/etc/db.yaml"] == conf_dir / "db.yaml"
+
+
+def test_validate_config_missing_config_file(tmp_path: Path) -> None:
+    """Validation should fail if a referenced config file doesn't exist."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="default",
+        config_files={"/config/app.toml": tmp_path / "nonexistent.toml"},
+    )
+    with pytest.raises(ValueError, match="Config file not found"):
+        validate_config(config, tmp_path)

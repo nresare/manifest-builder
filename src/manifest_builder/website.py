@@ -39,6 +39,36 @@ def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:
     return fragments
 
 
+def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]:
+    """Build ConfigMap objects grouped by the first component of each container path.
+
+    Args:
+        k8s_name: Kubernetes-safe name for the website (used in ConfigMap names)
+        config_files: Dict mapping container path -> resolved local file path
+
+    Returns:
+        List of ConfigMap dictionaries grouped by top-level directory
+    """
+    groups: dict[str, dict[str, str]] = {}
+    for container_path, local_path in config_files.items():
+        parts = Path(container_path).parts
+        if len(parts) < 2:
+            raise ValueError(f"Config file path must be absolute: {container_path}")
+        top_level = parts[1]
+        data_key = str(Path(*parts[2:])) if len(parts) > 2 else "."
+        groups.setdefault(top_level, {})[data_key] = local_path.read_text()
+
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": f"{k8s_name}-{top_level}"},
+            "data": data,
+        }
+        for top_level, data in sorted(groups.items())
+    ]
+
+
 def generate_website(
     config: WebsiteConfig,
     output_dir: Path,
@@ -131,5 +161,34 @@ def generate_website(
                 doc.setdefault("metadata", {}).setdefault("annotations", {})[
                     "hugo"
                 ] = config.hugo_repo
+
+    # Generate ConfigMaps from config files and inject volumes/mounts if configured
+    if config.config_files:
+        k8s_name = _make_k8s_name(config.name)
+        configmaps = _make_configmaps(k8s_name, config.config_files)
+        # Inject namespace into ConfigMaps (they're added after the main namespace loop)
+        for cm in configmaps:
+            cm.setdefault("metadata", {})["namespace"] = config.namespace
+        docs.extend(configmaps)
+
+        # Determine mount points from config_files (grouped by top-level directory)
+        mount_groups = {
+            Path(container_path).parts[1]
+            for container_path in config.config_files
+        }
+        for doc in docs:
+            if doc.get("kind") == "Deployment":
+                pod_spec = doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+                for top_level in sorted(mount_groups):
+                    cm_name = f"{k8s_name}-{top_level}"
+                    # Add volumeMount to each container
+                    for container in pod_spec.get("containers", []):
+                        container.setdefault("volumeMounts", []).append(
+                            {"name": cm_name, "mountPath": f"/{top_level}"}
+                        )
+                    # Add volume at pod level
+                    pod_spec.setdefault("volumes", []).append(
+                        {"name": cm_name, "configMap": {"name": cm_name}}
+                    )
 
     return _write_documents(docs, output_dir, config.namespace, verbose, config.name)
