@@ -30,3 +30,6 @@ source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "src/manifest_builder/_version.py"
+
+[tool.ruff]
+exclude = ["src/manifest_builder/_version.py"]

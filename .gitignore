@@ -20,3 +20,6 @@ output/
 
 # Local Python version
 .python-version
+
+# Auto-generated version file
+src/manifest_builder/_version.py
