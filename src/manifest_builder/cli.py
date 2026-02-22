@@ -10,6 +10,11 @@ import click
 from manifest_builder._version import __version__
 from manifest_builder.config import load_configs, resolve_configs
 from manifest_builder.generator import generate_manifests, setup_logging
+from manifest_builder.git_utils import (
+    create_manifest_commit,
+    get_git_commit,
+    is_git_dirty,
+)
 from manifest_builder.helmfile import load_helmfile
 
 
@@ -37,10 +42,22 @@ from manifest_builder.helmfile import load_helmfile
     is_flag=True,
     help="Show detailed output",
 )
+@click.option(
+    "--create-commit",
+    is_flag=True,
+    help="Create a git commit in the output directory with generated manifests",
+)
+@click.option(
+    "--allow-dirty-config",
+    is_flag=True,
+    help="Allow creation of commit even if config directory has local changes",
+)
 def main(
     config_dir: Path,
     output_dir: Path,
     verbose: bool,
+    create_commit: bool,
+    allow_dirty_config: bool,
 ) -> None:
     """Generate Kubernetes manifests from Helm charts."""
     setup_logging(verbose=verbose)
@@ -81,6 +98,18 @@ def main(
             repo_root=repo_root,
             verbose=verbose,
         )
+
+        # Create commit if requested
+        if create_commit:
+            if is_git_dirty(config_dir) and not allow_dirty_config:
+                raise ValueError(
+                    "Config directory has local changes. Use --allow-dirty-config "
+                    "to allow commit creation with uncommitted changes."
+                )
+
+            config_commit = get_git_commit(config_dir)
+            create_manifest_commit(output_dir, __version__, config_commit)
+            click.echo(f"✓ Created commit in {output_dir}")
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
