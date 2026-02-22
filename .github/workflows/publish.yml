@@ -40,16 +40,10 @@ jobs:
           # Generate PEP-503 index using simple503
           uv run simple503 wheels simple
 
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
 
-          git add wheels/ simple/
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Publish wheels from ${{ github.sha }}"
-            git push origin gh-pages
-          fi
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
