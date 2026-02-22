@@ -2,6 +2,16 @@
 
 Generate materialized Kubernetes manifests from various types of configuration
 
+## Installation
+
+To install or upgrade to the latest version:
+
+```bash
+uv pip install --upgrade --extra-index-url https://nresare.github.io/manifest-builder manifest-builder
+```
+
+This includes nightly builds of development versions (e.g., `0.2.1.dev6+...`).
+
 ## Development
 
 This project is using [uv](https://docs.astral.sh/uv/) for development. To set up your dev environment,
