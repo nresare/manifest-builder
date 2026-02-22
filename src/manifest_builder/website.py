@@ -146,10 +146,9 @@ def generate_website(
                         "spec", {}
                     )["initContainers"] = fragments["hugo_initcontainers"]
 
-                # Inject Hugo container if available
+                # Inject Hugo container if available (replaces existing containers)
                 if "hugo_container" in fragments:
-                    containers = doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {}).setdefault("containers", [])
-                    containers.append(fragments["hugo_container"])
+                    doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})["containers"] = [fragments["hugo_container"]]
 
                 # Inject Hugo volumes if available
                 if "hugo_volumes" in fragments:

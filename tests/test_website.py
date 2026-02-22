@@ -517,13 +517,11 @@ def test_generate_website_injects_hugo_fragments(tmp_path: Path) -> None:
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
 
-    # Verify containers were injected
+    # Verify Hugo container replaced the original
     containers = doc["spec"]["template"]["spec"]["containers"]
-    assert len(containers) == 2  # original + injected
-    assert containers[0]["name"] == "my-website"
-    assert containers[0]["image"] == "nginx:latest"
-    assert containers[1]["name"] == "web"
-    assert "static-web-server" in containers[1]["image"]
+    assert len(containers) == 1  # replaced, not appended
+    assert containers[0]["name"] == "web"
+    assert "static-web-server" in containers[0]["image"]
 
     # Verify init containers were injected
     init_containers = doc["spec"]["template"]["spec"]["initContainers"]
