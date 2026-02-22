@@ -46,7 +46,9 @@ def test_values_resolved_relative_to_config_dir(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    assert configs[0].values == [conf_dir / "myapp/values.yaml"]
+    config = configs[0]
+    assert isinstance(config, ChartConfig)
+    assert config.values == [conf_dir / "myapp/values.yaml"]
 
 
 def test_values_resolved_relative_to_custom_config_dir(tmp_path: Path) -> None:
@@ -72,6 +74,8 @@ def test_values_resolved_relative_to_custom_config_dir(tmp_path: Path) -> None:
     configs_a = load_configs(conf_a)
     configs_b = load_configs(conf_b)
 
+    assert isinstance(configs_a[0], ChartConfig)
+    assert isinstance(configs_b[0], ChartConfig)
     assert configs_a[0].values == [conf_a / "values.yaml"]
     assert configs_b[0].values == [conf_b / "values.yaml"]
     assert configs_a[0].values != configs_b[0].values
@@ -92,7 +96,9 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
     )
 
     configs = load_configs(conf_dir)
-    assert configs[0].values == []
+    config = configs[0]
+    assert isinstance(config, ChartConfig)
+    assert config.values == []
 
 
 # ---------------------------------------------------------------------------
@@ -298,9 +304,11 @@ def test_resolve_configs_fills_in_chart_and_repo(tmp_path: Path) -> None:
     )
     resolved = resolve_configs([config], _make_helmfile())
     assert len(resolved) == 1
-    assert resolved[0].chart == "myapp"
-    assert resolved[0].repo == "https://charts.example.com"
-    assert resolved[0].version == "1.2.3"
+    resolved_config = resolved[0]
+    assert isinstance(resolved_config, ChartConfig)
+    assert resolved_config.chart == "myapp"
+    assert resolved_config.repo == "https://charts.example.com"
+    assert resolved_config.version == "1.2.3"
 
 
 def test_resolve_configs_no_helmfile_raises_when_release_present(
@@ -552,6 +560,8 @@ config = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
 
     configs = load_configs(conf_dir)
     config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.config is not None
     assert len(config.config) == 2
     assert config.config["/config/app.conf"] == conf_dir / "app.conf"
     assert config.config["/etc/db.yaml"] == conf_dir / "db.yaml"

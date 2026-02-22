@@ -120,9 +120,7 @@ def _generate_helm_manifests(
         namespace=config.namespace,
         values_files=values_paths,
     )
-    return write_manifests(
-        manifest_content, output_dir, config.namespace, config.name
-    )
+    return write_manifests(manifest_content, output_dir, config.namespace, config.name)
 
 
 def generate_manifests(
@@ -207,9 +205,7 @@ def generate_manifests(
     logger.info(summary)
 
 
-def _cleanup_stale_files(
-    output_dir: Path, written_paths: dict[Path, str]
-) -> None:
+def _cleanup_stale_files(output_dir: Path, written_paths: dict[Path, str]) -> None:
     """Remove stale files and empty directories from previous runs.
 
     Args:
