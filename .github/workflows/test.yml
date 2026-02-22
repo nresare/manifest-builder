@@ -29,6 +29,23 @@ jobs:
       - name: Run pytest
         run: uv run pytest
 
+      - name: Compute version from git
+        run: |
+          git fetch --tags
+          TAG=$(git describe --tags --abbrev=0)
+          BASE=${TAG#v}
+          COUNT=$(git rev-list ${TAG}..HEAD --count)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          if [ "$COUNT" = "0" ]; then
+            VERSION="$BASE"
+          else
+            VERSION="${BASE}.dev${COUNT}+g${SHORT_SHA}"
+          fi
+
+          echo "UV_PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Version: $VERSION"
+
       - name: Build wheel
         run: uv build --wheel
 

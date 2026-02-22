@@ -35,9 +35,7 @@ jobs:
           path: dist/
 
       - name: Organize files and update index
-        run: |
-          # Generate PEP-503 index using simple503
-          uvx simple503 -s -B /manifest-builder dist simple
+        run: uvx simple503 -s -B /manifest-builder dist simple
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
