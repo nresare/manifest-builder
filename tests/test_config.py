@@ -564,3 +564,41 @@ def test_validate_config_missing_config_file(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="Config file not found"):
         validate_config(config, tmp_path)
+
+
+def test_load_website_config_with_extra_hostnames_string(tmp_path: Path) -> None:
+    """Website config can specify extra_hostnames as a string."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[websites]]
+name = "my-app"
+namespace = "default"
+extra_hostnames = "www.example.com"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.extra_hostnames == "www.example.com"
+
+
+def test_load_website_config_with_extra_hostnames_list(tmp_path: Path) -> None:
+    """Website config can specify extra_hostnames as a list."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[websites]]
+name = "my-app"
+namespace = "default"
+extra_hostnames = ["www.example.com", "example.cdn.com"]
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.extra_hostnames == ["www.example.com", "example.cdn.com"]

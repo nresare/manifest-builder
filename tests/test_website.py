@@ -694,3 +694,89 @@ def test_generate_website_no_config_no_configmap(tmp_path: Path) -> None:
     # Should have only deployment, no configmap
     assert len(paths) == 1
     assert "deployment" in next(iter(paths)).name
+
+
+def test_generate_website_extra_hostnames_emits_second_certificate(tmp_path: Path) -> None:
+    """Second Certificate should be generated for extra_hostnames."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    # Use bundled templates (which now include extra certificate logic)
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        extra_hostnames=["www.example.com", "app.example.com"],
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    # Should have certificates, gateway, httproute, service
+    cert_paths = [p for p in paths if "certificate" in p.name]
+    assert len(cert_paths) == 2
+
+    # Check the extra certificate
+    extra_cert_path = next(p for p in cert_paths if "extra" in p.name)
+    cert_doc = yaml.safe_load(extra_cert_path.read_text())
+    assert cert_doc["metadata"]["name"] == "my-app-extra"
+    assert cert_doc["spec"]["secretName"] == "my-app-extra-tls"
+    assert "www.example.com" in cert_doc["spec"]["dnsNames"]
+    assert "app.example.com" in cert_doc["spec"]["dnsNames"]
+
+
+def test_generate_website_extra_hostnames_gateway_has_extra_listeners(tmp_path: Path) -> None:
+    """Gateway should have extra listeners for each extra hostname."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        extra_hostnames=["www.example.com", "app.example.com"],
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    gateway_path = next(p for p in paths if "gateway" in p.name)
+    gateway_doc = yaml.safe_load(gateway_path.read_text())
+
+    listeners = gateway_doc["spec"]["listeners"]
+    assert len(listeners) == 3  # 1 main + 2 extra
+
+    # Check main listener
+    assert listeners[0]["hostname"] == "my-app"
+    assert listeners[0]["tls"]["certificateRefs"][0]["name"] == "my-app-tls"
+
+    # Check extra listeners
+    assert listeners[1]["hostname"] == "www.example.com"
+    assert listeners[1]["tls"]["certificateRefs"][0]["name"] == "my-app-extra-tls"
+    assert listeners[2]["hostname"] == "app.example.com"
+    assert listeners[2]["tls"]["certificateRefs"][0]["name"] == "my-app-extra-tls"
+
+
+def test_generate_website_extra_hostnames_in_httproute(tmp_path: Path) -> None:
+    """HTTPRoute should include extra hostnames."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        extra_hostnames=["www.example.com", "app.example.com"],
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    httproute_path = next(p for p in paths if "httproute" in p.name)
+    httproute_doc = yaml.safe_load(httproute_path.read_text())
+
+    hostnames = httproute_doc["spec"]["hostnames"]
+    assert "my-app" in hostnames
+    assert "www.example.com" in hostnames
+    assert "app.example.com" in hostnames
+
+
+def test_generate_website_extra_hostnames_string_normalized(tmp_path: Path) -> None:
+    """Extra hostnames string should be normalized to list."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        extra_hostnames="www.example.com",  # string instead of list
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    httproute_path = next(p for p in paths if "httproute" in p.name)
+    httproute_doc = yaml.safe_load(httproute_path.read_text())
+
+    hostnames = httproute_doc["spec"]["hostnames"]
+    assert "www.example.com" in hostnames

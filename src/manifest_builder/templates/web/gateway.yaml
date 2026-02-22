@@ -12,3 +12,12 @@ spec:
       tls:
         certificateRefs:
           - name: {{k8s_name}}-tls
+{{#extra_hostnames}}
+    - name: {{k8s_hostname}}
+      protocol: HTTPS
+      hostname: {{hostname}}
+      port: 443
+      tls:
+        certificateRefs:
+          - name: {{k8s_name}}-extra-tls
+{{/extra_hostnames}}

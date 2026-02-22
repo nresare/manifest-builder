@@ -33,6 +33,7 @@ class WebsiteConfig:
     image: str | None = None
     args: str | list[str] | None = None
     config: dict[str, Path] | None = None  # container path -> resolved local path
+    extra_hostnames: str | list[str] | None = None  # additional hostnames for certificates/listeners
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
@@ -148,6 +149,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         image=image,
         args=data.get("args"),
         config=config_dict,
+        extra_hostnames=data.get("extra_hostnames"),
     )
 
 

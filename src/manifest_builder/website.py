@@ -107,6 +107,17 @@ def generate_website(
         context["args"] = config.args
     if config.hugo_repo:
         context["git_repo"] = config.hugo_repo
+    if config.extra_hostnames:
+        normalized = (
+            config.extra_hostnames
+            if isinstance(config.extra_hostnames, list)
+            else [config.extra_hostnames]
+        )
+        context["extra_hostnames"] = [
+            {"hostname": h, "k8s_hostname": _make_k8s_name(h)}
+            for h in normalized
+        ]
+        context["has_extra_hostnames"] = True
 
     docs: list[dict] = []
     for template_file in sorted(templates_dir.glob("*.yaml")):

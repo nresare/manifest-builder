@@ -7,6 +7,9 @@ spec:
     - name: {{k8s_name}}
   hostnames:
     - {{name}}
+{{#extra_hostnames}}
+    - {{hostname}}
+{{/extra_hostnames}}
   rules:
     - backendRefs:
         - name: {{k8s_name}}
