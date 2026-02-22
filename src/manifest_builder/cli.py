@@ -7,12 +7,14 @@ from pathlib import Path
 
 import click
 
+from manifest_builder._version import __version__
 from manifest_builder.config import load_configs, resolve_configs
 from manifest_builder.generator import generate_manifests, setup_logging
 from manifest_builder.helmfile import load_helmfile
 
 
 @click.command()
+@click.version_option(version=__version__, prog_name="manifest-builder")
 @click.option(
     "--config-dir",
     "-c",
