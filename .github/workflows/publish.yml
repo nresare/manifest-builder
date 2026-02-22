@@ -32,37 +32,13 @@ jobs:
         run: |
           # Create directories if they don't exist
           mkdir -p wheels
-          mkdir -p simple/manifest-builder
+          mkdir -p simple
 
           # Move wheels to wheels directory
           mv dist/*.whl wheels/ 2>/dev/null || true
 
-          # Generate PEP-503 index
-          python << 'EOF'
-          import os
-          import re
-          from pathlib import Path
-
-          wheels_dir = Path("wheels")
-          index_file = Path("simple/manifest-builder/index.html")
-
-          # Get all wheel files
-          wheels = sorted(wheels_dir.glob("manifest_builder*.whl"))
-
-          # Generate index.html with PEP-503 format
-          html_content = '<!DOCTYPE html>\n<html>\n<head><title>Links for manifest-builder</title></head>\n<body>\n<h1>Links for manifest-builder</h1>\n'
-
-          for wheel in wheels:
-              wheel_name = wheel.name
-              html_content += f'<a href="../../wheels/{wheel_name}">{wheel_name}</a><br/>\n'
-
-          html_content += '</body>\n</html>'
-
-          index_file.parent.mkdir(parents=True, exist_ok=True)
-          index_file.write_text(html_content)
-
-          print(f"Generated index with {len(wheels)} wheel(s)")
-          EOF
+          # Generate PEP-503 index using simple503
+          uv run simple503 wheels simple
 
       - name: Commit and push
         run: |
