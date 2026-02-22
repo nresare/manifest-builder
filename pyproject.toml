@@ -18,6 +18,7 @@ dev = [
     "pytest",
     "ruff",
     "ty",
+    "simple503",
 ]
 
 [build-system]
