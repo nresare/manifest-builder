@@ -1,37 +1,30 @@
 # App configurations reference releases defined in helmfile.yaml.
 # The release provides the chart source (repo, chart name, version).
 
-[[helms]]
-namespace = "cert-manager"
-release = "cert-manager"
-values = ["cert-manager/values.yaml"]
-
-[[helms]]
-namespace = "surrealdb"
-release = "surrealdb"
-values = ["surrealdb/values.yaml"]
-
-# Example with a direct chart reference (no helmfile.yaml entry needed):
-# [[helms]]
-# name = "myapp"
-# namespace = "default"
-# chart = "./charts/myapp"
-# values = ["values/myapp/base.yaml", "values/myapp/prod.yaml"]
+#[[helms]]
+#namespace = "cert-manager"
+#release = "cert-manager"
+#values = ["cert-manager/values.yaml"]
+#
+#[[helms]]
+#namespace = "surrealdb"
+#release = "surrealdb"
+#values = ["surrealdb/values.yaml"]
 
 [[websites]]
 name = "zq.lu"
 namespace = "web"
 hugo_repo = "https://github.com/nresare/zq.lu"
 
-[[websites]]
-name = "noa.re"
-namespace = "web"
-hugo_repo = "https://github.com/nresare/noa.re"
-
-[[websites]]
-name = "id.noa.re"
-namespace = "idelephant"
-image = "nresare/idelephant:latest"
-args = ["-c", "/config/idelephant.toml"]
-[websites.config]
-"/config/idelephant.toml" = "idelephant/idelephant.toml"
+#[[websites]]
+#name = "noa.re"
+#namespace = "web"
+#hugo_repo = "https://github.com/nresare/noa.re"
+#
+#[[websites]]
+#name = "id.noa.re"
+#namespace = "idelephant"
+#image = "nresare/idelephant:latest"
+#args = ["-c", "/config/idelephant.toml"]
+#[websites.config]
+#"/config/idelephant.toml" = "idelephant/idelephant.toml"
