@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from manifest_builder.config import load_configs, resolve_configs
-from manifest_builder.generator import generate_manifests
+from manifest_builder.generator import generate_manifests, setup_logging
 from manifest_builder.helmfile import load_helmfile
 
 
@@ -41,6 +41,8 @@ def main(
     verbose: bool,
 ) -> None:
     """Generate Kubernetes manifests from Helm charts."""
+    setup_logging(verbose=verbose)
+
     try:
         # Get the repository root (current working directory)
         repo_root = Path.cwd()

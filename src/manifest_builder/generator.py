@@ -2,12 +2,34 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Manifest generation orchestration."""
 
+import logging
 from pathlib import Path
 
 import yaml
 
 from manifest_builder.config import ChartConfig, WebsiteConfig, validate_config
 from manifest_builder.helm import pull_chart, run_helm_template
+
+logger = logging.getLogger(__name__)
+
+
+def setup_logging(verbose: bool = False) -> None:
+    """Configure logging with a formatter for console output.
+
+    Args:
+        verbose: If True, set log level to DEBUG; otherwise INFO
+    """
+    formatter = logging.Formatter(
+        "[%(asctime)s] [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S %z",
+    )
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
 
 def _literal_str_representer(dumper: yaml.Dumper, data: str) -> yaml.Node:
@@ -56,20 +78,19 @@ def _generate_helm_manifests(
         config: Helm chart configuration
         output_dir: Directory to write generated manifests
         charts_dir: Directory for caching pulled charts
-        verbose: If True, print detailed output
+        verbose: If True, log detailed output
 
     Returns:
         Set of paths written
     """
-    if verbose:
-        print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
-        print(f"  Chart: {config.chart}")
-        if config.repo:
-            print(f"  Repo: {config.repo}")
-        if config.version:
-            print(f"  Version: {config.version}")
-        if config.values:
-            print(f"  Values: {', '.join(str(v) for v in config.values)}")
+    logger.info(f"Generating manifest for {config.name} ({config.namespace})")
+    logger.debug(f"Chart: {config.chart}")
+    if config.repo:
+        logger.debug(f"Repo: {config.repo}")
+    if config.version:
+        logger.debug(f"Version: {config.version}")
+    if config.values:
+        logger.debug(f"Values: {', '.join(str(v) for v in config.values)}")
 
     if config.chart is None:
         raise ValueError(
@@ -83,11 +104,10 @@ def _generate_helm_manifests(
     if config.repo:
         version_suffix = f"-{config.version}" if config.version else ""
         pull_dest = charts_dir / f"{config.chart}{version_suffix}"
-        if verbose:
-            if (pull_dest / config.chart).exists():
-                print(f"  Using cached chart at {pull_dest / config.chart}")
-            else:
-                print(f"  Pulling chart to {pull_dest / config.chart}")
+        if (pull_dest / config.chart).exists():
+            logger.debug(f"Using cached chart at {pull_dest / config.chart}")
+        else:
+            logger.debug(f"Pulling chart to {pull_dest / config.chart}")
         chart_path = str(
             pull_chart(config.chart, config.repo, pull_dest, config.version)
         )
@@ -101,7 +121,7 @@ def _generate_helm_manifests(
         values_files=values_paths,
     )
     return write_manifests(
-        manifest_content, output_dir, config.namespace, verbose, config.name
+        manifest_content, output_dir, config.namespace, config.name
     )
 
 
@@ -120,7 +140,7 @@ def generate_manifests(
         output_dir: Directory to write generated manifests
         repo_root: Repository root for resolving relative paths
         charts_dir: Directory for caching pulled charts (default: repo_root/.charts)
-        verbose: If True, print detailed output
+        verbose: If True, log detailed output
 
     Raises:
         ValueError: If configuration validation fails
@@ -129,7 +149,7 @@ def generate_manifests(
     from manifest_builder.website import generate_website
 
     if not configs:
-        print("No charts configured")
+        logger.info("No charts configured")
         return
 
     if charts_dir is None:
@@ -145,10 +165,9 @@ def generate_manifests(
     for config in configs:
         try:
             if isinstance(config, WebsiteConfig):
-                if verbose:
-                    print(
-                        f"\nGenerating manifest for {config.name} ({config.namespace})..."
-                    )
+                logger.info(
+                    f"Generating manifest for {config.name} ({config.namespace})"
+                )
                 paths = generate_website(config, output_dir, verbose)
             else:
                 paths = _generate_helm_manifests(
@@ -171,32 +190,31 @@ def generate_manifests(
             for path in paths:
                 written_paths[path] = config.name
 
-            print(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
+            logger.info(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
 
         except Exception:
-            print(f"✗ {config.name} ({config.namespace})")
+            logger.error(f"✗ {config.name} ({config.namespace})")
             raise
 
     # Remove any stale files left over from the previous runs
-    _cleanup_stale_files(output_dir, written_paths, verbose)
+    _cleanup_stale_files(output_dir, written_paths)
 
     total = len(written_paths)
-    summary = f"\nDone! Generated {total} manifest(s)"
+    summary = f"Done! Generated {total} manifest(s)"
     removed = _count_removed_files(output_dir, written_paths)
     if removed:
         summary += f", removed {removed} stale file(s)"
-    print(summary)
+    logger.info(summary)
 
 
 def _cleanup_stale_files(
-    output_dir: Path, written_paths: dict[Path, str], verbose: bool = False
+    output_dir: Path, written_paths: dict[Path, str]
 ) -> None:
     """Remove stale files and empty directories from previous runs.
 
     Args:
         output_dir: Directory to clean
         written_paths: Set of paths that were written in this run
-        verbose: If True, print each file removed
     """
     if not output_dir.exists():
         return
@@ -204,8 +222,7 @@ def _cleanup_stale_files(
     for existing in output_dir.rglob("*.yaml"):
         if existing not in written_paths:
             existing.unlink()
-            if verbose:
-                print(f"  removed {existing.relative_to(output_dir)}")
+            logger.debug(f"Removed {existing.relative_to(output_dir)}")
 
     # Remove any empty directories
     for directory in sorted(output_dir.rglob("*"), reverse=True):
@@ -313,7 +330,6 @@ def _write_documents(
     documents: list[dict],
     output_dir: Path,
     namespace: str,
-    verbose: bool = False,
     app_name: str | None = None,
 ) -> set[Path]:
     written: set[Path] = set()
@@ -340,9 +356,7 @@ def _write_documents(
                 f.write(f"# Source: {app_name}\n")
             yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
 
-        if verbose:
-            print(f"  → {subdir}/{filename}")
-
+        logger.debug(f"Wrote {subdir}/{filename}")
         written.add(output_path)
 
     return written
@@ -352,7 +366,6 @@ def write_manifests(
     content: str,
     output_dir: Path,
     namespace: str,
-    verbose: bool = False,
     app_name: str | None = None,
 ) -> set[Path]:
     """
@@ -366,7 +379,6 @@ def write_manifests(
         content: YAML manifest content with multiple documents
         output_dir: Base output directory
         namespace: Kubernetes namespace (used for namespaced resources)
-        verbose: If True, print each file written
         app_name: If provided, written as a comment at the top of each file
 
     Returns:
@@ -377,13 +389,16 @@ def write_manifests(
     """
     documents = [doc for doc in yaml.safe_load_all(content) if doc]
 
-    # Filter out Helm test hook documents
-    documents = [
-        doc
-        for doc in documents
-        if doc.get("metadata", {}).get("annotations", {}).get("helm.sh/hook")
-        != "test"
-    ]
+    # Filter out Helm test hook documents and log them
+    filtered_documents = []
+    for doc in documents:
+        if doc.get("metadata", {}).get("annotations", {}).get("helm.sh/hook") == "test":
+            kind = doc.get("kind")
+            name = doc.get("metadata", {}).get("name")
+            logger.info(f"Skipping {kind} {name} (helm.sh/hook=test)")
+        else:
+            filtered_documents.append(doc)
+    documents = filtered_documents
 
     # Add namespace to namespaced resources that don't already have one
     for doc in documents:
@@ -392,4 +407,4 @@ def write_manifests(
             if "namespace" not in doc.get("metadata", {}):
                 doc.setdefault("metadata", {})["namespace"] = namespace
 
-    return _write_documents(documents, output_dir, namespace, verbose, app_name)
+    return _write_documents(documents, output_dir, namespace, app_name)

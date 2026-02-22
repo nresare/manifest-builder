@@ -209,4 +209,4 @@ def generate_website(
                         {"name": cm_name, "configMap": {"name": cm_name}}
                     )
 
-    return _write_documents(docs, output_dir, config.namespace, verbose, config.name)
+    return _write_documents(docs, output_dir, config.namespace, config.name)
