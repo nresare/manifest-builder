@@ -6,10 +6,10 @@
 #release = "cert-manager"
 #values = ["cert-manager/values.yaml"]
 #
-#[[helms]]
-#namespace = "surrealdb"
-#release = "surrealdb"
-#values = ["surrealdb/values.yaml"]
+[[helms]]
+namespace = "surrealdb"
+release = "surrealdb"
+values = ["surrealdb/values.yaml"]
 
 [[websites]]
 name = "zq.lu"

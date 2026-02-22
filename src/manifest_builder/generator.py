@@ -376,4 +376,12 @@ def write_manifests(
         OSError: If files cannot be written
     """
     documents = [doc for doc in yaml.safe_load_all(content) if doc]
+
+    # Add namespace to namespaced resources that don't already have one
+    for doc in documents:
+        kind = doc.get("kind")
+        if kind and kind not in CLUSTER_SCOPED_KINDS:
+            if "namespace" not in doc.get("metadata", {}):
+                doc.setdefault("metadata", {})["namespace"] = namespace
+
     return _write_documents(documents, output_dir, namespace, verbose, app_name)
