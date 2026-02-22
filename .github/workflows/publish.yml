@@ -22,6 +22,9 @@ jobs:
           ref: gh-pages
           fetch-depth: 0
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
         with:
@@ -38,7 +41,7 @@ jobs:
           mv dist/*.whl wheels/ 2>/dev/null || true
 
           # Generate PEP-503 index using simple503
-          uv run simple503 wheels simple
+          uvx simple503 wheels simple
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
