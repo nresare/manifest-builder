@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from manifest_builder.generator import _make_k8s_name, strip_helm_metadata, write_manifests
+from manifest_builder.generator import (
+    _make_k8s_name,
+    strip_helm_metadata,
+    write_manifests,
+)
 
 NAMESPACED_YAML = """\
 apiVersion: apps/v1

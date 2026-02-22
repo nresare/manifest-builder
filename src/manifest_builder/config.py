@@ -4,7 +4,6 @@
 
 import tomllib
 from dataclasses import dataclass
-from importlib.resources import files
 from pathlib import Path
 
 from manifest_builder.helmfile import Helmfile
@@ -33,7 +32,9 @@ class WebsiteConfig:
     image: str | None = None
     args: str | list[str] | None = None
     config: dict[str, Path] | None = None  # container path -> resolved local path
-    extra_hostnames: str | list[str] | None = None  # additional hostnames for certificates/listeners
+    extra_hostnames: str | list[str] | None = (
+        None  # additional hostnames for certificates/listeners
+    )
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
@@ -69,7 +70,9 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
             data = tomllib.load(f)
 
         if "helms" not in data and "websites" not in data:
-            raise ValueError(f"No [[helms]] or [[websites]] entries found in {toml_file}")
+            raise ValueError(
+                f"No [[helms]] or [[websites]] entries found in {toml_file}"
+            )
 
         for helm_data in data.get("helms", []):
             configs.append(_parse_chart_config(helm_data, toml_file))

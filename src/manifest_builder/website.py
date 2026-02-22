@@ -7,7 +7,11 @@ from pathlib import Path
 import yaml
 
 from manifest_builder.config import WebsiteConfig
-from manifest_builder.generator import CLUSTER_SCOPED_KINDS, _make_k8s_name, _write_documents
+from manifest_builder.generator import (
+    CLUSTER_SCOPED_KINDS,
+    _make_k8s_name,
+    _write_documents,
+)
 
 
 def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:
@@ -94,7 +98,9 @@ def generate_website(
     else:
         from importlib.resources import files as get_package_files
 
-        templates_dir = Path(str(get_package_files("manifest_builder") / "templates" / "web"))
+        templates_dir = Path(
+            str(get_package_files("manifest_builder") / "templates" / "web")
+        )
 
     # Prepare the template context with name, k8s_name, and optional image/args/git_repo
     context = {
@@ -114,8 +120,7 @@ def generate_website(
             else [config.extra_hostnames]
         )
         context["extra_hostnames"] = [
-            {"hostname": h, "k8s_hostname": _make_k8s_name(h)}
-            for h in normalized
+            {"hostname": h, "k8s_hostname": _make_k8s_name(h)} for h in normalized
         ]
         context["has_extra_hostnames"] = True
 
@@ -143,9 +148,7 @@ def generate_website(
     for doc in docs:
         kind = doc.get("kind")
         if kind and kind not in CLUSTER_SCOPED_KINDS:
-            doc.setdefault("metadata", {})[
-                "namespace"
-            ] = config.namespace
+            doc.setdefault("metadata", {})["namespace"] = config.namespace
 
     # Apply Hugo fragments and annotations if configured
     if config.hugo_repo:
@@ -159,7 +162,9 @@ def generate_website(
 
                 # Inject Hugo container if available (replaces existing containers)
                 if "hugo_container" in fragments:
-                    doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})["containers"] = [fragments["hugo_container"]]
+                    doc.setdefault("spec", {}).setdefault("template", {}).setdefault(
+                        "spec", {}
+                    )["containers"] = [fragments["hugo_container"]]
 
                 # Inject Hugo volumes if available
                 if "hugo_volumes" in fragments:
@@ -168,9 +173,9 @@ def generate_website(
                     )["volumes"] = fragments["hugo_volumes"]
 
                 # Add Hugo repo annotation
-                doc.setdefault("metadata", {}).setdefault("annotations", {})[
-                    "hugo"
-                ] = config.hugo_repo
+                doc.setdefault("metadata", {}).setdefault("annotations", {})["hugo"] = (
+                    config.hugo_repo
+                )
 
     # Generate ConfigMaps from config files and inject volumes/mounts if configured
     if config.config:
@@ -183,12 +188,15 @@ def generate_website(
 
         # Determine mount points from config (grouped by top-level directory)
         mount_groups = {
-            Path(container_path).parts[1]
-            for container_path in config.config
+            Path(container_path).parts[1] for container_path in config.config
         }
         for doc in docs:
             if doc.get("kind") == "Deployment":
-                pod_spec = doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+                pod_spec = (
+                    doc.setdefault("spec", {})
+                    .setdefault("template", {})
+                    .setdefault("spec", {})
+                )
                 for top_level in sorted(mount_groups):
                     cm_name = f"{k8s_name}-{top_level}"
                     # Add volumeMount to each container

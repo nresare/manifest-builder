@@ -146,10 +146,14 @@ def generate_manifests(
         try:
             if isinstance(config, WebsiteConfig):
                 if verbose:
-                    print(f"\nGenerating manifest for {config.name} ({config.namespace})...")
+                    print(
+                        f"\nGenerating manifest for {config.name} ({config.namespace})..."
+                    )
                 paths = generate_website(config, output_dir, verbose)
             else:
-                paths = _generate_helm_manifests(config, output_dir, charts_dir, verbose)
+                paths = _generate_helm_manifests(
+                    config, output_dir, charts_dir, verbose
+                )
 
             # Check for conflicts with the previously written files
             conflicts = {p: written_paths[p] for p in paths if p in written_paths}

@@ -172,7 +172,9 @@ def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
         description = "this file has no [[helms]] or [[websites]]"
         """,
     )
-    with pytest.raises(ValueError, match="No \\[\\[helms\\]\\] or \\[\\[websites\\]\\]"):
+    with pytest.raises(
+        ValueError, match="No \\[\\[helms\\]\\] or \\[\\[websites\\]\\]"
+    ):
         load_configs(conf)
 
 

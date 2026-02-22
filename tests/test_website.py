@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from manifest_builder.config import WebsiteConfig
-from manifest_builder.generator import _make_k8s_name, generate_manifests
+from manifest_builder.generator import generate_manifests
 from manifest_builder.website import generate_website
 
 SIMPLE_DEPLOYMENT = """\
@@ -40,7 +40,9 @@ def _make_website_config(tmp_path: Path) -> tuple[WebsiteConfig, Path]:
 
 def test_generate_website_writes_yaml_files(tmp_path: Path) -> None:
     config, templates_dir = _make_website_config(tmp_path)
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     assert len(paths) == 1
     (path,) = paths
@@ -50,7 +52,9 @@ def test_generate_website_writes_yaml_files(tmp_path: Path) -> None:
 
 def test_generate_website_adds_source_comment(tmp_path: Path) -> None:
     config, templates_dir = _make_website_config(tmp_path)
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     content = path.read_text()
@@ -64,10 +68,10 @@ def test_generate_website_multiple_yaml_files(tmp_path: Path) -> None:
     (templates_dir / "service.yaml").write_text(
         "apiVersion: v1\nkind: Service\nmetadata:\n  name: simple-svc\n  namespace: staging\n"
     )
-    config = WebsiteConfig(
-        name="my-website", namespace="staging"
+    config = WebsiteConfig(name="my-website", namespace="staging")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     names = {p.name for p in paths}
     assert names == {"deployment-my-website.yaml", "service-simple-svc.yaml"}
 
@@ -80,10 +84,10 @@ def test_generate_website_multi_document_template_file(tmp_path: Path) -> None:
         + "---\n"
         + "apiVersion: v1\nkind: Service\nmetadata:\n  name: simple-svc\n  namespace: staging\n"
     )
-    config = WebsiteConfig(
-        name="my-website", namespace="staging"
+    config = WebsiteConfig(name="my-website", namespace="staging")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     names = {p.name for p in paths}
     assert names == {"deployment-my-website.yaml", "service-simple-svc.yaml"}
 
@@ -91,10 +95,10 @@ def test_generate_website_multi_document_template_file(tmp_path: Path) -> None:
 def test_generate_website_empty_templates_dir(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
-    config = WebsiteConfig(
-        name="my-website", namespace="staging"
+    config = WebsiteConfig(name="my-website", namespace="staging")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     assert paths == set()
 
 
@@ -104,10 +108,10 @@ def test_generate_website_non_yaml_files_ignored(tmp_path: Path) -> None:
     (templates_dir / "deployment.yaml").write_text(SIMPLE_DEPLOYMENT)
     (templates_dir / "notes.txt").write_text("this should be ignored\n")
     (templates_dir / "script.sh").write_text("#!/bin/sh\n")
-    config = WebsiteConfig(
-        name="my-website", namespace="staging"
+    config = WebsiteConfig(name="my-website", namespace="staging")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     assert len(paths) == 1
 
 
@@ -121,10 +125,10 @@ def test_generate_website_cluster_scoped_resource(tmp_path: Path) -> None:
         "  name: my-role\n"
         "rules: []\n"
     )
-    config = WebsiteConfig(
-        name="my-website", namespace="staging"
+    config = WebsiteConfig(name="my-website", namespace="staging")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
     (path,) = paths
     assert path == tmp_path / "output" / "cluster" / "clusterrole-my-role.yaml"
 
@@ -136,17 +140,17 @@ def test_generate_website_namespace_fallback(tmp_path: Path) -> None:
     (templates_dir / "configmap.yaml").write_text(
         "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: my-config\ndata: {}\n"
     )
-    config = WebsiteConfig(
-        name="my-website", namespace="fallback-ns"    )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    config = WebsiteConfig(name="my-website", namespace="fallback-ns")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
     (path,) = paths
     assert path.parent.name == "fallback-ns"
 
 
 def test_generate_manifests_with_website_config(tmp_path: Path) -> None:
     """generate_manifests dispatches to website app generation without needing helm."""
-    config = WebsiteConfig(
-        name="zq.lu", namespace="web"    )
+    config = WebsiteConfig(name="zq.lu", namespace="web")
     output_dir = tmp_path / "output"
 
     generate_manifests([config], output_dir, repo_root=tmp_path)
@@ -166,8 +170,7 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
     stale.parent.mkdir(parents=True)
     stale.write_text("stale: true\n")
 
-    config = WebsiteConfig(
-        name="zq.lu", namespace="web"    )
+    config = WebsiteConfig(name="zq.lu", namespace="web")
     generate_manifests([config], output_dir, repo_root=tmp_path)
 
     assert not stale.exists()
@@ -178,7 +181,9 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
 def test_generate_website_file_content_is_valid_yaml(tmp_path: Path) -> None:
     """Each output file must be parseable YAML with the correct structure."""
     config, templates_dir = _make_website_config(tmp_path)
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     # skip the leading comment line before parsing
@@ -213,8 +218,12 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
     with mock.patch(
         "manifest_builder.website.generate_website",
         side_effect=[
-            {tmp_path / "output" / "ns1" / "deployment-app.yaml"},  # config1 generates this
-            {tmp_path / "output" / "ns1" / "deployment-app.yaml"},  # config2 also generates this
+            {
+                tmp_path / "output" / "ns1" / "deployment-app.yaml"
+            },  # config1 generates this
+            {
+                tmp_path / "output" / "ns1" / "deployment-app.yaml"
+            },  # config2 also generates this
         ],
     ):
         with pytest.raises(ValueError, match="Configuration conflict"):
@@ -231,7 +240,9 @@ def test_generate_website_provides_k8s_name_variable(tmp_path: Path) -> None:
     )
 
     config = WebsiteConfig(name="my.example.com", namespace="production")
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -249,7 +260,9 @@ def test_generate_website_renders_mustache_templates(tmp_path: Path) -> None:
     )
 
     config = WebsiteConfig(name="my-app", namespace="production")
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -257,7 +270,9 @@ def test_generate_website_renders_mustache_templates(tmp_path: Path) -> None:
     assert doc["metadata"]["name"] == "my-app"
 
 
-def test_generate_website_adds_namespace_to_namespaced_resources(tmp_path: Path) -> None:
+def test_generate_website_adds_namespace_to_namespaced_resources(
+    tmp_path: Path,
+) -> None:
     """Namespaced resources should get the namespace from the config."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -271,7 +286,9 @@ def test_generate_website_adds_namespace_to_namespaced_resources(tmp_path: Path)
     )
 
     config = WebsiteConfig(name="test-app", namespace="production")
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Check the Deployment got the namespace
     deployment_files = [p for p in paths if "deployment" in p.name]
@@ -299,7 +316,9 @@ def test_generate_website_applies_hugo_repo_annotation(tmp_path: Path) -> None:
         namespace="production",
         hugo_repo="https://github.com/user/repo",
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -318,7 +337,9 @@ def test_generate_website_no_hugo_repo_annotation(tmp_path: Path) -> None:
         name="my-website",
         namespace="production",
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -340,7 +361,9 @@ def test_generate_website_image_parameter_available_in_template(tmp_path: Path) 
         namespace="production",
         image="nginx:1.20",
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -362,11 +385,16 @@ def test_generate_website_args_string_parameter_available_in_template(
         namespace="production",
         args="--debug --log-level=info",
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
-    assert doc["spec"]["template"]["spec"]["containers"][0]["args"][0] == "--debug --log-level=info"
+    assert (
+        doc["spec"]["template"]["spec"]["containers"][0]["args"][0]
+        == "--debug --log-level=info"
+    )
 
 
 def test_generate_website_args_list_parameter_available_in_template(
@@ -385,7 +413,9 @@ def test_generate_website_args_list_parameter_available_in_template(
         namespace="production",
         args=["--debug", "--log-level=info"],
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -409,7 +439,9 @@ def test_generate_website_ignores_underscore_prefixed_templates(tmp_path: Path) 
     )
 
     config = WebsiteConfig(name="my-website", namespace="production")
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Only the deployment should be generated, not the fragment
     assert len(paths) == 1
@@ -445,15 +477,13 @@ def test_generate_website_multiple_fragments_not_in_output(tmp_path: Path) -> No
         "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec: {}\n"
     )
     # Create multiple fragments
-    (templates_dir / "_init_container.yaml").write_text(
-        "name: init\nimage: busybox\n"
-    )
-    (templates_dir / "_sidecar.yaml").write_text(
-        "name: sidecar\nimage: nginx\n"
-    )
+    (templates_dir / "_init_container.yaml").write_text("name: init\nimage: busybox\n")
+    (templates_dir / "_sidecar.yaml").write_text("name: sidecar\nimage: nginx\n")
 
     config = WebsiteConfig(name="my-website", namespace="production")
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Only the deployment should be in output, both fragments ignored
     assert len(paths) == 1
@@ -512,7 +542,9 @@ def test_generate_website_injects_hugo_fragments(tmp_path: Path) -> None:
         image="nginx:latest",
         hugo_repo="https://github.com/user/my-website",
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     (path,) = paths
     doc = yaml.safe_load(path.read_text())
@@ -536,7 +568,9 @@ def test_generate_website_injects_hugo_fragments(tmp_path: Path) -> None:
     assert any(v["name"] == "public" for v in volumes)
 
     # Verify hugo annotation was added
-    assert doc["metadata"]["annotations"]["hugo"] == "https://github.com/user/my-website"
+    assert (
+        doc["metadata"]["annotations"]["hugo"] == "https://github.com/user/my-website"
+    )
 
 
 def test_generate_website_emits_configmap(tmp_path: Path) -> None:
@@ -559,7 +593,9 @@ def test_generate_website_emits_configmap(tmp_path: Path) -> None:
         image="myapp:1.0",
         config={"/config/app.toml": config_file},
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Should have 2 files: deployment + configmap
     assert len(paths) == 2
@@ -599,7 +635,9 @@ def test_generate_website_configmap_groups_by_top_level_dir(tmp_path: Path) -> N
             "/etc/db.conf": config_file2,
         },
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Should have 3 files: deployment + 2 configmaps
     assert len(paths) == 3
@@ -631,7 +669,9 @@ def test_generate_website_configmap_same_dir_merged(tmp_path: Path) -> None:
             "/config/other.toml": config_file2,
         },
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Should have 2 files: deployment + 1 configmap
     assert len(paths) == 2
@@ -660,19 +700,27 @@ def test_generate_website_injects_volume_and_mount(tmp_path: Path) -> None:
         image="myapp:1.0",
         config={"/config/app.toml": config_file},
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     deployment_path = next(p for p in paths if "deployment" in p.name)
     deployment_doc = yaml.safe_load(deployment_path.read_text())
 
     # Check volume is present
     volumes = deployment_doc["spec"]["template"]["spec"]["volumes"]
-    assert any(v["name"] == "my-app-config" and v.get("configMap", {}).get("name") == "my-app-config" for v in volumes)
+    assert any(
+        v["name"] == "my-app-config"
+        and v.get("configMap", {}).get("name") == "my-app-config"
+        for v in volumes
+    )
 
     # Check volumeMount is present in container
     containers = deployment_doc["spec"]["template"]["spec"]["containers"]
     mounts = containers[0]["volumeMounts"]
-    assert any(m["name"] == "my-app-config" and m["mountPath"] == "/config" for m in mounts)
+    assert any(
+        m["name"] == "my-app-config" and m["mountPath"] == "/config" for m in mounts
+    )
 
 
 def test_generate_website_no_config_no_configmap(tmp_path: Path) -> None:
@@ -689,14 +737,18 @@ def test_generate_website_no_config_no_configmap(tmp_path: Path) -> None:
         namespace="production",
         image="myapp:1.0",
     )
-    paths = generate_website(config, tmp_path / "output", _templates_override=templates_dir)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
 
     # Should have only deployment, no configmap
     assert len(paths) == 1
     assert "deployment" in next(iter(paths)).name
 
 
-def test_generate_website_extra_hostnames_emits_second_certificate(tmp_path: Path) -> None:
+def test_generate_website_extra_hostnames_emits_second_certificate(
+    tmp_path: Path,
+) -> None:
     """Second Certificate should be generated for extra_hostnames."""
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -722,7 +774,9 @@ def test_generate_website_extra_hostnames_emits_second_certificate(tmp_path: Pat
     assert "app.example.com" in cert_doc["spec"]["dnsNames"]
 
 
-def test_generate_website_extra_hostnames_gateway_has_extra_listeners(tmp_path: Path) -> None:
+def test_generate_website_extra_hostnames_gateway_has_extra_listeners(
+    tmp_path: Path,
+) -> None:
     """Gateway should have extra listeners for each extra hostname."""
     config = WebsiteConfig(
         name="my-app",
