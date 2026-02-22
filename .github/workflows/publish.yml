@@ -1,0 +1,138 @@
+name: Test, Build, and Publish
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Run ruff check
+        run: uv run ruff check
+
+      - name: Run ruff format check
+        run: uv run ruff format --check
+
+      - name: Run type check
+        run: uv run ty check
+
+      - name: Run pytest
+        run: uv run pytest
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      wheel-name: ${{ steps.build.outputs.wheel-name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Build wheel
+        id: build
+        run: |
+          uv build --wheel
+          wheel_file=$(ls dist/*.whl | head -1)
+          echo "wheel-name=$(basename "$wheel_file")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Organize files and update index
+        run: |
+          # Create directories if they don't exist
+          mkdir -p wheels
+          mkdir -p simple/manifest-builder
+
+          # Move wheels to wheels directory
+          mv dist/*.whl wheels/ 2>/dev/null || true
+
+          # Generate PEP-503 index
+          python << 'EOF'
+          import os
+          import re
+          from pathlib import Path
+
+          wheels_dir = Path("wheels")
+          index_file = Path("simple/manifest-builder/index.html")
+
+          # Get all wheel files
+          wheels = sorted(wheels_dir.glob("manifest_builder*.whl"))
+
+          # Generate index.html with PEP-503 format
+          html_content = '<!DOCTYPE html>\n<html>\n<head><title>Links for manifest-builder</title></head>\n<body>\n<h1>Links for manifest-builder</h1>\n'
+
+          for wheel in wheels:
+              wheel_name = wheel.name
+              html_content += f'<a href="../../wheels/{wheel_name}">{wheel_name}</a><br/>\n'
+
+          html_content += '</body>\n</html>'
+
+          index_file.parent.mkdir(parents=True, exist_ok=True)
+          index_file.write_text(html_content)
+
+          print(f"Generated index with {len(wheels)} wheel(s)")
+          EOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add wheels/ simple/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Publish wheels from ${{ github.sha }}"
+            git push origin gh-pages
+          fi
