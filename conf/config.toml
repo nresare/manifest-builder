@@ -16,10 +16,12 @@ name = "zq.lu"
 namespace = "web"
 hugo_repo = "https://github.com/nresare/zq.lu"
 
-#[[websites]]
-#name = "noa.re"
-#namespace = "web"
-#hugo_repo = "https://github.com/nresare/noa.re"
+[[websites]]
+name = "noa.re"
+namespace = "web"
+hugo_repo = "https://github.com/nresare/noa.re"
+extra_hostnames = "nadia.resare.com"
+
 #
 #[[websites]]
 #name = "id.noa.re"
