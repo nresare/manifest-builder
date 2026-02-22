@@ -377,6 +377,14 @@ def write_manifests(
     """
     documents = [doc for doc in yaml.safe_load_all(content) if doc]
 
+    # Filter out Helm test hook documents
+    documents = [
+        doc
+        for doc in documents
+        if doc.get("metadata", {}).get("annotations", {}).get("helm.sh/hook")
+        != "test"
+    ]
+
     # Add namespace to namespaced resources that don't already have one
     for doc in documents:
         kind = doc.get("kind")
