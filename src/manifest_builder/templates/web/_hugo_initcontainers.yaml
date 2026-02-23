@@ -7,7 +7,7 @@
     if [ ! -d /src/.git ]; then
       git clone {{git_repo}} --recurse-submodules --depth=1 /src
     else
-      git pull --recurse-submodules
+      git pull {{git_repo}} --recurse-submodules
     fi
   volumeMounts:
     - mountPath: /src

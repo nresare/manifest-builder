@@ -886,3 +886,83 @@ def test_generate_website_bundled_template_no_args(tmp_path: Path) -> None:
 
     container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
     assert "args" not in container
+
+
+def test_generate_website_external_secrets_injects_volumes_and_mounts(
+    tmp_path: Path,
+) -> None:
+    """External secrets should be injected as volumes and mounts in Deployment."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        external_secrets=["/email-password", "/db/credentials"],
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+
+    # Check volume mounts
+    mounts = container.get("volumeMounts", [])
+    mount_paths = {m["mountPath"]: m["name"] for m in mounts}
+    assert "/email-password" in mount_paths
+    assert "/db/credentials" in mount_paths
+    assert mount_paths["/email-password"] == "email-password"
+    assert mount_paths["/db/credentials"] == "db-credentials"
+
+    # Check volumes
+    volumes = {v["name"]: v for v in pod_spec.get("volumes", [])}
+    assert "email-password" in volumes
+    assert "db-credentials" in volumes
+    assert volumes["email-password"]["secret"]["secretName"] == "email-password"
+    assert volumes["db-credentials"]["secret"]["secretName"] == "db-credentials"
+
+
+def test_generate_website_external_secrets_single_secret(tmp_path: Path) -> None:
+    """Single external secret should work correctly."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        external_secrets=["/api-key"],
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+
+    # Check mount exists
+    mounts = container.get("volumeMounts", [])
+    assert any(m["mountPath"] == "/api-key" for m in mounts)
+
+    # Check volume exists with correct secret name
+    volumes = {v["name"]: v for v in pod_spec.get("volumes", [])}
+    assert "api-key" in volumes
+    assert volumes["api-key"]["secret"]["secretName"] == "api-key"
+
+
+def test_generate_website_no_external_secrets(tmp_path: Path) -> None:
+    """Deployment without external secrets should not have unnecessary volumes."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    volumes = pod_spec.get("volumes", [])
+
+    # Should not have any secret volumes
+    secret_volumes = [v for v in volumes if "secret" in v]
+    assert len(secret_volumes) == 0

@@ -35,6 +35,9 @@ class WebsiteConfig:
     extra_hostnames: str | list[str] | None = (
         None  # additional hostnames for certificates/listeners
     )
+    external_secrets: list[str] | None = (
+        None  # mount paths for external secrets (e.g., ["/email-password"])
+    )
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
@@ -145,6 +148,11 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
             for container_path, local_path in data["config"].items()
         }
 
+    # Parse external_secrets: normalize to list
+    external_secrets = data.get("external_secrets")
+    if external_secrets is not None and isinstance(external_secrets, str):
+        external_secrets = [external_secrets]
+
     return WebsiteConfig(
         name=data["name"],
         namespace=data["namespace"],
@@ -153,6 +161,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         args=data.get("args"),
         config=config_dict,
         extra_hostnames=data.get("extra_hostnames"),
+        external_secrets=external_secrets,
     )
 
 
