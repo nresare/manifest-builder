@@ -26,6 +26,7 @@ run `uv sync`. Tests and checks can be run with the following commands:
 
 - Python 3.14+
 - Helm 3.x (must be installed and available in PATH)
+- Git (required for `--create-commit` feature)
 
 ## License
 
