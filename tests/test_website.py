@@ -834,3 +834,55 @@ def test_generate_website_extra_hostnames_string_normalized(tmp_path: Path) -> N
 
     hostnames = httproute_doc["spec"]["hostnames"]
     assert "www.example.com" in hostnames
+
+
+def test_generate_website_bundled_template_args_string(tmp_path: Path) -> None:
+    """Bundled template should correctly render string args in Deployment."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        args="--debug --log-level=info",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert "args" in container
+    assert container["args"] == ["--debug --log-level=info"]
+
+
+def test_generate_website_bundled_template_args_list(tmp_path: Path) -> None:
+    """Bundled template should correctly render list args in Deployment."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        args=["--debug", "--log-level=info", "--port=8080"],
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert "args" in container
+    assert container["args"] == ["--debug", "--log-level=info", "--port=8080"]
+
+
+def test_generate_website_bundled_template_no_args(tmp_path: Path) -> None:
+    """Bundled template should omit args field when not specified."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert "args" not in container

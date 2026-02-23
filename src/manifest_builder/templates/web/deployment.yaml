@@ -17,3 +17,9 @@ spec:
       containers:
         - name: {{k8s_name}}
           image: {{image}}
+{{#args}}
+          args:
+{{#args}}
+            - {{.}}
+{{/args}}
+{{/args}}

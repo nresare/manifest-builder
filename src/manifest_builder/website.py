@@ -3,6 +3,7 @@
 """Website manifest generation from Mustache templates."""
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -103,7 +104,7 @@ def generate_website(
         )
 
     # Prepare the template context with name, k8s_name, and optional image/args/git_repo
-    context = {
+    context: dict[str, Any] = {
         "name": config.name,
         "k8s_name": _make_k8s_name(config.name),
     }
@@ -119,8 +120,14 @@ def generate_website(
             if isinstance(config.extra_hostnames, list)
             else [config.extra_hostnames]
         )
+
+        class ExtraHostname:
+            def __init__(self, hostname: str, k8s_hostname: str) -> None:
+                self.hostname = hostname
+                self.k8s_hostname = k8s_hostname
+
         context["extra_hostnames"] = [
-            {"hostname": h, "k8s_hostname": _make_k8s_name(h)} for h in normalized
+            ExtraHostname(h, _make_k8s_name(h)) for h in normalized
         ]
         context["has_extra_hostnames"] = True
 
