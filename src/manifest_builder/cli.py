@@ -92,7 +92,7 @@ def main(
             click.echo(f"Loaded {len(configs)} chart configuration(s)")
 
         # Generate manifests
-        generate_manifests(
+        written_paths = generate_manifests(
             configs=configs,
             output_dir=output_dir,
             repo_root=repo_root,
@@ -108,7 +108,9 @@ def main(
                 )
 
             config_commit = get_git_commit(config_dir)
-            create_manifest_commit(output_dir, __version__, config_commit)
+            create_manifest_commit(
+                output_dir, __version__, config_commit, written_paths
+            )
             click.echo(f"✓ Created commit in {output_dir}")
 
     except FileNotFoundError as e:

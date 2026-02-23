@@ -129,7 +129,7 @@ def generate_manifests(
     repo_root: Path,
     charts_dir: Path | None = None,
     verbose: bool = False,
-) -> None:
+) -> set[Path]:
     """
     Generate manifests for all configured apps.
 
@@ -140,6 +140,9 @@ def generate_manifests(
         charts_dir: Directory for caching pulled charts (default: repo_root/.charts)
         verbose: If True, log detailed output
 
+    Returns:
+        Set of paths that were written
+
     Raises:
         ValueError: If configuration validation fails
         RuntimeError: If manifest generation fails
@@ -148,7 +151,7 @@ def generate_manifests(
 
     if not configs:
         logger.info("No charts configured")
-        return
+        return set()
 
     if charts_dir is None:
         charts_dir = repo_root / ".charts"
@@ -203,6 +206,8 @@ def generate_manifests(
     if removed:
         summary += f", removed {removed} stale file(s)"
     logger.info(summary)
+
+    return set(written_paths.keys())
 
 
 def _cleanup_stale_files(output_dir: Path, written_paths: dict[Path, str]) -> None:
