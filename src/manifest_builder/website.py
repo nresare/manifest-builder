@@ -44,6 +44,26 @@ def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:
     return fragments
 
 
+def _secret_name_from_mount_path(mount_path: str) -> str:
+    """Generate a secret name from a mount path.
+
+    Removes the leading / and converts subsequent / to -.
+
+    Examples:
+        "/email-password" -> "email-password"
+        "/config/database" -> "config-database"
+
+    Args:
+        mount_path: The mount path (e.g., "/email-password")
+
+    Returns:
+        The generated secret name
+    """
+    if not mount_path.startswith("/"):
+        raise ValueError(f"Mount path must start with /: {mount_path}")
+    return mount_path[1:].replace("/", "-")
+
+
 def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]:
     """Build ConfigMap objects grouped by the first component of each container path.
 
@@ -214,6 +234,29 @@ def generate_website(
                     # Add volume at pod level
                     pod_spec.setdefault("volumes", []).append(
                         {"name": cm_name, "configMap": {"name": cm_name}}
+                    )
+
+    # Handle external secrets if configured
+    if config.external_secrets:
+        k8s_name = _make_k8s_name(config.name)
+        for mount_path in config.external_secrets:
+            secret_name = _secret_name_from_mount_path(mount_path)
+            # Inject volumes and mounts into Deployment
+            for doc in docs:
+                if doc.get("kind") == "Deployment":
+                    pod_spec = (
+                        doc.setdefault("spec", {})
+                        .setdefault("template", {})
+                        .setdefault("spec", {})
+                    )
+                    # Add volumeMount to each container
+                    for container in pod_spec.get("containers", []):
+                        container.setdefault("volumeMounts", []).append(
+                            {"name": secret_name, "mountPath": mount_path}
+                        )
+                    # Add volume at pod level
+                    pod_spec.setdefault("volumes", []).append(
+                        {"name": secret_name, "secret": {"secretName": secret_name}}
                     )
 
     return _write_documents(docs, output_dir, config.namespace, config.name)

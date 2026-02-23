@@ -614,3 +614,43 @@ extra_hostnames = ["www.example.com", "example.cdn.com"]
     config = configs[0]
     assert isinstance(config, WebsiteConfig)
     assert config.extra_hostnames == ["www.example.com", "example.cdn.com"]
+
+
+def test_load_website_config_with_external_secrets_list(tmp_path: Path) -> None:
+    """Website config can specify external_secrets as a list of mount paths."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[websites]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+external_secrets = ["/email-password", "/db/credentials"]
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.external_secrets == ["/email-password", "/db/credentials"]
+
+
+def test_load_website_config_with_external_secrets_string(tmp_path: Path) -> None:
+    """Website config can specify external_secrets as a single string (normalized to list)."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[websites]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+external_secrets = "/api-key"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.external_secrets == ["/api-key"]
