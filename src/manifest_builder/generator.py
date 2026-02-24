@@ -154,7 +154,7 @@ def generate_manifests(
         return set()
 
     if charts_dir is None:
-        charts_dir = repo_root / ".charts"
+        charts_dir = Path.home() / ".cache" / "manifest-builder"
 
     # Validate all of the configs first
     for config in configs:
