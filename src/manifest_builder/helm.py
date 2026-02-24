@@ -2,8 +2,40 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Helm command execution for generating manifests."""
 
+import logging
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def get_helm_version() -> str:
+    """
+    Get the installed helm version.
+
+    Returns:
+        Helm version string (e.g., "v3.12.0")
+
+    Raises:
+        RuntimeError: If helm is not available or version check fails
+    """
+    try:
+        result = subprocess.run(
+            ["helm", "version", "--short"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"helm version check failed: {result.stderr}")
+        return result.stdout.strip()
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "helm is not installed or not available in PATH. "
+            "Please install helm: https://helm.sh/docs/intro/install/"
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("helm version check timed out") from e
 
 
 def check_helm_available() -> bool:
@@ -14,13 +46,13 @@ def check_helm_available() -> bool:
         True if helm is available, False otherwise
     """
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["helm", "version", "--short"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return result.returncode == 0
+        return True
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
@@ -51,9 +83,13 @@ def pull_chart(
     chart_dir = dest / chart
 
     if chart_dir.exists():
+        logger.debug(f"Using cached chart at {chart_dir}")
         return chart_dir
 
     dest.mkdir(parents=True, exist_ok=True)
+
+    version_str = f" (version {version})" if version else ""
+    logger.info(f"Downloading chart {chart} from {repo}{version_str}")
 
     cmd = [
         "helm",
@@ -77,6 +113,7 @@ def pull_chart(
             check=True,
             timeout=120,
         )
+        logger.debug(f"Successfully unpacked chart to {chart_dir}")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"helm pull failed for {chart}: {e.stderr}") from e
     except subprocess.TimeoutExpired as e:

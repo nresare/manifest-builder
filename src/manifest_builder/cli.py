@@ -15,6 +15,7 @@ from manifest_builder.git_utils import (
     get_git_commit,
     is_git_dirty,
 )
+from manifest_builder.helm import get_helm_version
 from manifest_builder.helmfile import load_helmfile
 
 
@@ -63,6 +64,13 @@ def main(
     setup_logging(verbose=verbose)
 
     try:
+        # Log helm version
+        helm_version = get_helm_version()
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"Using helm {helm_version}")
+
         # Get the repository root (current working directory)
         repo_root = Path.cwd()
 
