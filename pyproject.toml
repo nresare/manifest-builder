@@ -3,7 +3,7 @@ name = "manifest-builder"
 dynamic = ["version"]
 description = "Generate materialized Kubernetes manifests from Helm charts"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "click",
     "pyyaml",
