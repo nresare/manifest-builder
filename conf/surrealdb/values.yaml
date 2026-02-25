@@ -1,6 +1,0 @@
-persistence:
-  enabled: true
-strategy:
-  type: Recreate
-surrealdb:
-  path: surrealkv://data/db
