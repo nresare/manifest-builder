@@ -47,7 +47,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
     """
     Load all app configurations from TOML files in the config directory.
 
-    Each TOML file may contain [[helms]] and [[websites]] tables.
+    Each TOML file may contain [[helm]] and [[website]] tables.
 
     Args:
         config_dir: Directory containing TOML configuration files
@@ -75,15 +75,13 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
         with open(toml_file, "rb") as f:
             data = tomllib.load(f)
 
-        if "helms" not in data and "websites" not in data:
-            raise ValueError(
-                f"No [[helms]] or [[websites]] entries found in {toml_file}"
-            )
+        if "helm" not in data and "website" not in data:
+            raise ValueError(f"No [[helm]] or [[website]] entries found in {toml_file}")
 
-        for helm_data in data.get("helms", []):
+        for helm_data in data.get("helm", []):
             configs.append(_parse_chart_config(helm_data, toml_file))
 
-        for website_data in data.get("websites", []):
+        for website_data in data.get("website", []):
             configs.append(_parse_website_config(website_data, toml_file))
 
     return configs

@@ -36,7 +36,7 @@ def test_values_resolved_relative_to_config_dir(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "default"
         chart = "./charts/myapp"
         name = "myapp"
@@ -63,7 +63,7 @@ def test_values_resolved_relative_to_custom_config_dir(tmp_path: Path) -> None:
             conf_dir,
             "config.toml",
             """\
-            [[helms]]
+            [[helm]]
             namespace = "default"
             chart = "./charts/myapp"
             name = "myapp"
@@ -88,7 +88,7 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "default"
         chart = "./charts/myapp"
         name = "myapp"
@@ -175,12 +175,10 @@ def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
         "config.toml",
         """\
         [metadata]
-        description = "this file has no [[helms]] or [[websites]]"
+        description = "this file has no [[helm]] or [[website]]"
         """,
     )
-    with pytest.raises(
-        ValueError, match="No \\[\\[helms\\]\\] or \\[\\[websites\\]\\]"
-    ):
+    with pytest.raises(ValueError, match="No \\[\\[helm\\]\\] or \\[\\[website\\]\\]"):
         load_configs(conf)
 
 
@@ -191,7 +189,7 @@ def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:
         conf,
         "config.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "default"
         name = "myapp"
         chart = "./charts/myapp"
@@ -209,7 +207,7 @@ def test_load_configs_neither_release_nor_chart_raises(tmp_path: Path) -> None:
         conf,
         "config.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "default"
         name = "myapp"
         """,
@@ -225,7 +223,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
         conf,
         "a.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "ns-a"
         chart = "./charts/a"
         name = "app-a"
@@ -235,7 +233,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
         conf,
         "b.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "ns-b"
         chart = "./charts/b"
         name = "app-b"
@@ -254,12 +252,12 @@ def test_load_configs_mixed_helms_and_websites(tmp_path: Path) -> None:
         conf,
         "config.toml",
         """\
-        [[helms]]
+        [[helm]]
         namespace = "default"
         chart = "./charts/myapp"
         name = "my-helm-app"
 
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "web"
         """,
@@ -353,7 +351,7 @@ def test_load_website_config(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "production"
         """,
@@ -374,7 +372,7 @@ def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         namespace = "default"
         """,
     )
@@ -389,7 +387,7 @@ def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "production"
         hugo_repo = "https://github.com/user/repo"
@@ -410,7 +408,7 @@ def test_load_website_config_with_image(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "production"
         image = "nginx:latest"
@@ -431,7 +429,7 @@ def test_load_website_config_with_args_string(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "production"
         args = "--flag=value"
@@ -452,7 +450,7 @@ def test_load_website_config_with_args_list(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "production"
         args = ["--flag1=value1", "--flag2=value2"]
@@ -475,7 +473,7 @@ def test_load_website_config_hugo_repo_and_image_mutually_exclusive(
         conf_dir,
         "config.toml",
         """\
-        [[websites]]
+        [[website]]
         name = "my-website"
         namespace = "production"
         hugo_repo = "https://github.com/user/repo"
@@ -523,7 +521,7 @@ def test_load_website_config_with_config(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-[[websites]]
+[[website]]
 name = "my-app"
 namespace = "default"
 config = { "/config/app.conf" = "app.conf" }
@@ -551,7 +549,7 @@ def test_load_website_config_multiple_config(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-[[websites]]
+[[website]]
 name = "my-app"
 namespace = "default"
 config = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
@@ -584,7 +582,7 @@ def test_load_website_config_with_extra_hostnames_string(tmp_path: Path) -> None
         tmp_path,
         "config.toml",
         """\
-[[websites]]
+[[website]]
 name = "my-app"
 namespace = "default"
 extra_hostnames = "www.example.com"
@@ -603,7 +601,7 @@ def test_load_website_config_with_extra_hostnames_list(tmp_path: Path) -> None:
         tmp_path,
         "config.toml",
         """\
-[[websites]]
+[[website]]
 name = "my-app"
 namespace = "default"
 extra_hostnames = ["www.example.com", "example.cdn.com"]
@@ -622,7 +620,7 @@ def test_load_website_config_with_external_secrets_list(tmp_path: Path) -> None:
         tmp_path,
         "config.toml",
         """\
-[[websites]]
+[[website]]
 name = "my-app"
 namespace = "default"
 image = "nginx:latest"
@@ -642,7 +640,7 @@ def test_load_website_config_with_external_secrets_string(tmp_path: Path) -> Non
         tmp_path,
         "config.toml",
         """\
-[[websites]]
+[[website]]
 name = "my-app"
 namespace = "default"
 image = "nginx:latest"
@@ -667,7 +665,7 @@ def test_load_chart_config_with_extra_resources(tmp_path: Path) -> None:
         conf_dir,
         "config.toml",
         """\
-[[helms]]
+[[helm]]
 name = "my-chart"
 namespace = "default"
 chart = "./charts/myapp"
