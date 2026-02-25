@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
+import yaml
+
 from manifest_builder.generator import (
+    _ensure_namespaces,
     _make_k8s_name,
     strip_helm_metadata,
     write_manifests,
@@ -205,3 +208,87 @@ def test_make_k8s_name_invalid_characters() -> None:
     """Names with invalid characters (after conversion) should raise ValueError."""
     with pytest.raises(ValueError, match="contains invalid characters"):
         _make_k8s_name("my_app")  # underscore is invalid
+
+
+# ---------------------------------------------------------------------------
+# _ensure_namespaces
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_namespaces_creates_namespace_for_each_directory(
+    tmp_path: Path,
+) -> None:
+    """A Namespace manifest is created for each namespace directory."""
+    ns_dir = tmp_path / "my-app"
+    ns_dir.mkdir()
+    (ns_dir / "deployment-my-app.yaml").write_text("placeholder")
+
+    written: dict[Path, str] = {ns_dir / "deployment-my-app.yaml": "my-app"}
+    new = _ensure_namespaces(tmp_path, written)
+
+    ns_file = ns_dir / "namespace-my-app.yaml"
+    assert ns_file in new
+    doc = yaml.safe_load(ns_file.read_text())
+    assert doc["kind"] == "Namespace"
+    assert doc["metadata"]["name"] == "my-app"
+
+
+def test_ensure_namespaces_skips_cluster_directory(tmp_path: Path) -> None:
+    """The cluster/ directory is not treated as a namespace."""
+    cluster_dir = tmp_path / "cluster"
+    cluster_dir.mkdir()
+    (cluster_dir / "clusterrole-foo.yaml").write_text("placeholder")
+
+    written: dict[Path, str] = {cluster_dir / "clusterrole-foo.yaml": "foo"}
+    new = _ensure_namespaces(tmp_path, written)
+
+    assert new == {}
+
+
+def test_ensure_namespaces_skips_when_namespace_already_written(
+    tmp_path: Path,
+) -> None:
+    """No Namespace is created if one was already written by a generator."""
+    ns_dir = tmp_path / "my-app"
+    ns_dir.mkdir()
+    ns_file = ns_dir / "namespace-my-app.yaml"
+    ns_file.write_text("existing")
+
+    written: dict[Path, str] = {ns_file: "my-app"}
+    new = _ensure_namespaces(tmp_path, written)
+
+    assert new == {}
+
+
+def test_ensure_namespaces_skips_when_namespace_in_cluster_dir(
+    tmp_path: Path,
+) -> None:
+    """No Namespace is created if one was written to cluster/ by a generator."""
+    ns_dir = tmp_path / "my-app"
+    ns_dir.mkdir()
+    cluster_ns = tmp_path / "cluster" / "namespace-my-app.yaml"
+    cluster_ns.parent.mkdir()
+    cluster_ns.write_text("existing")
+
+    written: dict[Path, str] = {cluster_ns: "my-app"}
+    new = _ensure_namespaces(tmp_path, written)
+
+    assert new == {}
+
+
+def test_ensure_namespaces_multiple_namespaces(tmp_path: Path) -> None:
+    """Each namespace directory gets its own Namespace manifest."""
+    for ns in ("ns-a", "ns-b"):
+        (tmp_path / ns).mkdir()
+
+    written: dict[Path, str] = {}
+    new = _ensure_namespaces(tmp_path, written)
+
+    assert tmp_path / "ns-a" / "namespace-ns-a.yaml" in new
+    assert tmp_path / "ns-b" / "namespace-ns-b.yaml" in new
+
+
+def test_ensure_namespaces_nonexistent_output_dir(tmp_path: Path) -> None:
+    """Returns empty dict when the output directory does not exist yet."""
+    new = _ensure_namespaces(tmp_path / "nonexistent", {})
+    assert new == {}
