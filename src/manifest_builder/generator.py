@@ -232,6 +232,10 @@ def generate_manifests(
             logger.error(f"✗ {config.name} ({config.namespace})")
             raise
 
+    # Create Namespace objects for any namespace that lacks one
+    namespace_paths = _ensure_namespaces(output_dir, written_paths)
+    written_paths.update(namespace_paths)
+
     # Remove any stale files left over from the previous runs
     _cleanup_stale_files(output_dir, written_paths)
 
@@ -243,6 +247,54 @@ def generate_manifests(
     logger.info(summary)
 
     return set(written_paths.keys())
+
+
+def _ensure_namespaces(
+    output_dir: Path, written_paths: dict[Path, str]
+) -> dict[Path, str]:
+    """Create Namespace objects for namespace directories that lack one.
+
+    For each subdirectory of output_dir (excluding cluster/), checks whether a
+    Namespace resource already exists for that namespace. If not, writes a minimal
+    Namespace manifest to <output_dir>/<namespace>/namespace-<namespace>.yaml.
+
+    Args:
+        output_dir: Base output directory
+        written_paths: Paths written so far in this run
+
+    Returns:
+        Dict of newly created namespace paths mapped to the source label
+    """
+    if not output_dir.exists():
+        return {}
+
+    new_paths: dict[Path, str] = {}
+    for ns_dir in sorted(output_dir.iterdir()):
+        if not ns_dir.is_dir() or ns_dir.name == "cluster":
+            continue
+
+        ns_name = ns_dir.name
+        ns_filename = f"namespace-{ns_name}.yaml"
+
+        # Skip if a Namespace was already written for this namespace
+        if ns_dir / ns_filename in written_paths:
+            continue
+        if output_dir / "cluster" / ns_filename in written_paths:
+            continue
+
+        doc = {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {"name": ns_name},
+        }
+        out_path = ns_dir / ns_filename
+        with open(out_path, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
+
+        logger.debug(f"Created Namespace {ns_name}")
+        new_paths[out_path] = "__namespaces__"
+
+    return new_paths
 
 
 def _cleanup_stale_files(output_dir: Path, written_paths: dict[Path, str]) -> None:
