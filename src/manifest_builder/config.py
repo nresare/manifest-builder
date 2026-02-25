@@ -139,12 +139,12 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         if field not in data:
             raise ValueError(f"Missing required field '{field}' in {source_file}")
 
-    hugo_repo = data.get("hugo_repo")
+    hugo_repo = data.get("hugo-repo")
     image = data.get("image")
 
     if hugo_repo and image:
         raise ValueError(
-            f"Cannot specify both 'hugo_repo' and 'image' in {source_file}"
+            f"Cannot specify both 'hugo-repo' and 'image' in {source_file}"
         )
 
     # Parse config: resolve local paths relative to the TOML file's directory
@@ -157,7 +157,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         }
 
     # Parse external_secrets: normalize to list
-    external_secrets = data.get("external_secrets")
+    external_secrets = data.get("external-secrets")
     if external_secrets is not None and isinstance(external_secrets, str):
         external_secrets = [external_secrets]
 
@@ -168,7 +168,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         image=image,
         args=data.get("args"),
         config=config_dict,
-        extra_hostnames=data.get("extra_hostnames"),
+        extra_hostnames=data.get("extra-hostnames"),
         external_secrets=external_secrets,
     )
 

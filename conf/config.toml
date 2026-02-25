@@ -14,13 +14,13 @@ values = ["surrealdb/values.yaml"]
 [[website]]
 name = "zq.lu"
 namespace = "web"
-hugo_repo = "https://github.com/nresare/zq.lu"
+hugo-repo = "https://github.com/nresare/zq.lu"
 
 [[website]]
 name = "noa.re"
 namespace = "web"
-hugo_repo = "https://github.com/nresare/noa.re"
-extra_hostnames = "nadia.resare.com"
+hugo-repo = "https://github.com/nresare/noa.re"
+extra-hostnames = "nadia.resare.com"
 
 #
 #[[website]]

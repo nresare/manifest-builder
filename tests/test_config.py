@@ -390,7 +390,7 @@ def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
         [[website]]
         name = "my-website"
         namespace = "production"
-        hugo_repo = "https://github.com/user/repo"
+        hugo-repo = "https://github.com/user/repo"
         """,
     )
 
@@ -476,12 +476,12 @@ def test_load_website_config_hugo_repo_and_image_mutually_exclusive(
         [[website]]
         name = "my-website"
         namespace = "production"
-        hugo_repo = "https://github.com/user/repo"
+        hugo-repo = "https://github.com/user/repo"
         image = "nginx:latest"
         """,
     )
 
-    with pytest.raises(ValueError, match="Cannot specify both 'hugo_repo' and 'image'"):
+    with pytest.raises(ValueError, match="Cannot specify both 'hugo-repo' and 'image'"):
         load_configs(conf_dir)
 
 
@@ -585,7 +585,7 @@ def test_load_website_config_with_extra_hostnames_string(tmp_path: Path) -> None
 [[website]]
 name = "my-app"
 namespace = "default"
-extra_hostnames = "www.example.com"
+extra-hostnames = "www.example.com"
 """,
     )
 
@@ -604,7 +604,7 @@ def test_load_website_config_with_extra_hostnames_list(tmp_path: Path) -> None:
 [[website]]
 name = "my-app"
 namespace = "default"
-extra_hostnames = ["www.example.com", "example.cdn.com"]
+extra-hostnames = ["www.example.com", "example.cdn.com"]
 """,
     )
 
@@ -624,7 +624,7 @@ def test_load_website_config_with_external_secrets_list(tmp_path: Path) -> None:
 name = "my-app"
 namespace = "default"
 image = "nginx:latest"
-external_secrets = ["/email-password", "/db/credentials"]
+external-secrets = ["/email-password", "/db/credentials"]
 """,
     )
 
@@ -644,7 +644,7 @@ def test_load_website_config_with_external_secrets_string(tmp_path: Path) -> Non
 name = "my-app"
 namespace = "default"
 image = "nginx:latest"
-external_secrets = "/api-key"
+external-secrets = "/api-key"
 """,
     )
 
