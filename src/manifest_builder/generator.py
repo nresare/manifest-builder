@@ -120,7 +120,30 @@ def _generate_helm_manifests(
         namespace=config.namespace,
         values_files=values_paths,
     )
-    return write_manifests(manifest_content, output_dir, config.namespace, config.name)
+    paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
+
+    # Handle extra resources if configured
+    if config.extra_resources:
+        extra_docs: list[dict] = []
+        for yaml_file in sorted(config.extra_resources.glob("*.yaml")):
+            for doc in yaml.safe_load_all(yaml_file.read_text()):
+                if doc:
+                    # Add namespace to namespaced resources without one
+                    kind = doc.get("kind")
+                    if kind and kind not in CLUSTER_SCOPED_KINDS:
+                        if "namespace" not in doc.get("metadata", {}):
+                            doc.setdefault("metadata", {})["namespace"] = (
+                                config.namespace
+                            )
+                    extra_docs.append(doc)
+        if extra_docs:
+            extra_paths = _write_documents(
+                extra_docs, output_dir, config.namespace, config.name
+            )
+            paths.update(extra_paths)
+            logger.debug(f"Copied {len(extra_docs)} extra resources")
+
+    return paths
 
 
 def generate_manifests(

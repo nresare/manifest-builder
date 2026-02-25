@@ -20,6 +20,9 @@ class ChartConfig:
     version: str | None
     values: list[Path]
     release: str | None  # helmfile release name; None for direct chart entries
+    extra_resources: Path | None = (
+        None  # directory with additional YAML resources to include
+    )
 
 
 @dataclass
@@ -101,6 +104,11 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
     config_dir = source_file.parent
     values = [config_dir / v for v in data.get("values", [])]
 
+    # Parse extra_resources: resolve path relative to the TOML file's directory
+    extra_resources = None
+    if "extra-resources" in data:
+        extra_resources = config_dir / data["extra-resources"]
+
     if has_release:
         return ChartConfig(
             name=data["release"],
@@ -110,6 +118,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             version=None,
             values=values,
             release=data["release"],
+            extra_resources=extra_resources,
         )
     else:
         if "name" not in data:
@@ -122,6 +131,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             version=data.get("version"),
             values=values,
             release=None,
+            extra_resources=extra_resources,
         )
 
 
@@ -230,6 +240,7 @@ def resolve_configs(
                 version=hf_release.version,
                 values=config.values,
                 release=config.release,
+                extra_resources=config.extra_resources,
             )
         )
 
@@ -260,6 +271,16 @@ def validate_config(config: ChartConfig | WebsiteConfig, repo_root: Path) -> Non
         if not values_path.exists():
             raise ValueError(
                 f"Values file not found for chart '{config.name}': {values_path}"
+            )
+
+    if config.extra_resources is not None:
+        if not config.extra_resources.exists():
+            raise ValueError(
+                f"Extra resources directory not found for '{config.name}': {config.extra_resources}"
+            )
+        if not config.extra_resources.is_dir():
+            raise ValueError(
+                f"Extra resources path is not a directory for '{config.name}': {config.extra_resources}"
             )
 
     if config.chart is not None and (
