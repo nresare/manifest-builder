@@ -9,6 +9,7 @@ import pytest
 
 from manifest_builder.config import (
     ChartConfig,
+    SimpleConfig,
     WebsiteConfig,
     load_configs,
     resolve_configs,
@@ -178,7 +179,7 @@ def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
         description = "this file has no [[helm]] or [[website]]"
         """,
     )
-    with pytest.raises(ValueError, match="No \\[\\[helm\\]\\] or \\[\\[website\\]\\]"):
+    with pytest.raises(ValueError, match="No \\[\\[helm\\]\\]"):
         load_configs(conf)
 
 
@@ -713,4 +714,209 @@ def test_validate_config_chart_extra_resources_not_a_directory(tmp_path: Path) -
         extra_resources=not_a_dir,
     )
     with pytest.raises(ValueError, match="Extra resources path is not a directory"):
+        validate_config(config, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# SimpleConfig parsing
+# ---------------------------------------------------------------------------
+
+
+def test_load_simple_config_basic(tmp_path: Path) -> None:
+    """Basic [[simple]] entry with namespace and copy-from is parsed correctly."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+namespace = "acme-dns"
+copy-from = "manifests"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, SimpleConfig)
+    assert config.namespace == "acme-dns"
+    assert config.copy_from == tmp_path / "manifests"
+    assert config.config is None
+
+
+def test_load_simple_config_name_defaults_to_namespace(tmp_path: Path) -> None:
+    """When name is omitted, it defaults to the namespace value."""
+    (tmp_path / "manifests").mkdir()
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+namespace = "acme-dns"
+copy-from = "manifests"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, SimpleConfig)
+    assert config.name == "acme-dns"
+
+
+def test_load_simple_config_explicit_name(tmp_path: Path) -> None:
+    """An explicit name field overrides the namespace default."""
+    (tmp_path / "manifests").mkdir()
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+name = "my-app"
+namespace = "acme-dns"
+copy-from = "manifests"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, SimpleConfig)
+    assert config.name == "my-app"
+
+
+def test_load_simple_config_missing_namespace(tmp_path: Path) -> None:
+    """Missing namespace field raises ValueError."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+copy-from = "manifests"
+""",
+    )
+    with pytest.raises(ValueError, match="Missing required field 'namespace'"):
+        load_configs(tmp_path)
+
+
+def test_load_simple_config_missing_copy_from(tmp_path: Path) -> None:
+    """Missing copy-from field raises ValueError."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+namespace = "acme-dns"
+""",
+    )
+    with pytest.raises(ValueError, match="Missing required field 'copy-from'"):
+        load_configs(tmp_path)
+
+
+def test_load_simple_config_copy_from_resolved_relative_to_toml(
+    tmp_path: Path,
+) -> None:
+    """copy-from path is resolved relative to the TOML file's directory."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    (conf_dir / "manifests").mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+[[simple]]
+namespace = "acme-dns"
+copy-from = "manifests"
+""",
+    )
+
+    configs = load_configs(conf_dir)
+    config = configs[0]
+    assert isinstance(config, SimpleConfig)
+    assert config.copy_from == conf_dir / "manifests"
+
+
+def test_load_simple_config_with_config_dict(tmp_path: Path) -> None:
+    """[simple.config] inline table is parsed into a dict of resolved paths."""
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "app.cfg").write_text("key=value")
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+namespace = "acme-dns"
+copy-from = "manifests"
+[simple.config]
+"/config/app.cfg" = "app.cfg"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, SimpleConfig)
+    assert config.config is not None
+    assert config.config["/config/app.cfg"] == tmp_path / "app.cfg"
+
+
+def test_load_simple_config_with_config_array_of_tables(tmp_path: Path) -> None:
+    """[[simple.config]] array-of-tables syntax is merged into a single dict."""
+    (tmp_path / "manifests").mkdir()
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[simple]]
+namespace = "acme-dns"
+copy-from = "manifests"
+[[simple.config]]
+"/config/app.cfg" = "app.cfg"
+[[simple.config]]
+"/config/other.cfg" = "other.cfg"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, SimpleConfig)
+    assert config.config is not None
+    assert set(config.config.keys()) == {"/config/app.cfg", "/config/other.cfg"}
+    assert config.config["/config/app.cfg"] == tmp_path / "app.cfg"
+    assert config.config["/config/other.cfg"] == tmp_path / "other.cfg"
+
+
+def test_validate_simple_config_missing_copy_from_dir(tmp_path: Path) -> None:
+    """Validation fails if copy-from directory does not exist."""
+    config = SimpleConfig(
+        name="acme-dns",
+        namespace="acme-dns",
+        copy_from=tmp_path / "nonexistent",
+    )
+    with pytest.raises(ValueError, match="copy-from directory not found"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_simple_config_copy_from_not_a_directory(tmp_path: Path) -> None:
+    """Validation fails if copy-from path is a file, not a directory."""
+    not_a_dir = tmp_path / "file.yaml"
+    not_a_dir.write_text("content")
+    config = SimpleConfig(
+        name="acme-dns",
+        namespace="acme-dns",
+        copy_from=not_a_dir,
+    )
+    with pytest.raises(ValueError, match="copy-from path is not a directory"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_simple_config_missing_config_file(tmp_path: Path) -> None:
+    """Validation fails if a referenced config file does not exist."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    config = SimpleConfig(
+        name="acme-dns",
+        namespace="acme-dns",
+        copy_from=manifests_dir,
+        config={"/config/app.cfg": tmp_path / "nonexistent.cfg"},
+    )
+    with pytest.raises(ValueError, match="Config file not found"):
         validate_config(config, tmp_path)
