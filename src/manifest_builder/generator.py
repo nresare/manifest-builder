@@ -122,12 +122,10 @@ def _generate_helm_manifests(
     )
     paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
 
-    logger.info(f"NOA NOA before extra resources handling: {config.extra_resources}")
     # Handle extra resources if configured
     if config.extra_resources:
         extra_docs: list[dict] = []
         for yaml_file in sorted(config.extra_resources.glob("*.yaml")):
-            logger.info(f"Found extra resource {yaml_file} in {config.extra_resources}")
             for doc in yaml.safe_load_all(yaml_file.read_text()):
                 if doc:
                     # Add namespace to namespaced resources without one
@@ -138,10 +136,12 @@ def _generate_helm_manifests(
                                 config.namespace
                             )
                     extra_docs.append(doc)
-        extra_paths = _write_documents(
-            extra_docs, output_dir, config.namespace, config.name
-        )
-        paths.update(extra_paths)
+        if extra_docs:
+            extra_paths = _write_documents(
+                extra_docs, output_dir, config.namespace, config.name
+            )
+            paths.update(extra_paths)
+            logger.debug(f"Copied {len(extra_docs)} extra resources")
 
     return paths
 
