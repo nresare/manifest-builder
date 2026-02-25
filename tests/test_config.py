@@ -654,3 +654,65 @@ external_secrets = "/api-key"
     config = configs[0]
     assert isinstance(config, WebsiteConfig)
     assert config.external_secrets == ["/api-key"]
+
+
+def test_load_chart_config_with_extra_resources(tmp_path: Path) -> None:
+    """Chart config can specify a directory with extra YAML resources."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    resources_dir = conf_dir / "resources"
+    resources_dir.mkdir()
+
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+[[helms]]
+name = "my-chart"
+namespace = "default"
+chart = "./charts/myapp"
+extra-resources = "resources"
+""",
+    )
+
+    configs = load_configs(conf_dir)
+    config = configs[0]
+    assert isinstance(config, ChartConfig)
+    assert config.extra_resources == resources_dir
+
+
+def test_validate_config_chart_extra_resources_missing_directory(
+    tmp_path: Path,
+) -> None:
+    """Validation should fail if extra_resources directory doesn't exist."""
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="./charts/myapp",
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        extra_resources=tmp_path / "nonexistent",
+    )
+    with pytest.raises(ValueError, match="Extra resources directory not found"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_config_chart_extra_resources_not_a_directory(tmp_path: Path) -> None:
+    """Validation should fail if extra_resources path is not a directory."""
+    not_a_dir = tmp_path / "file.txt"
+    not_a_dir.write_text("content")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="./charts/myapp",
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        extra_resources=not_a_dir,
+    )
+    with pytest.raises(ValueError, match="Extra resources path is not a directory"):
+        validate_config(config, tmp_path)
