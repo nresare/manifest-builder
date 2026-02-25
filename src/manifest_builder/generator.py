@@ -7,7 +7,12 @@ from pathlib import Path
 
 import yaml
 
-from manifest_builder.config import ChartConfig, WebsiteConfig, validate_config
+from manifest_builder.config import (
+    ChartConfig,
+    SimpleConfig,
+    WebsiteConfig,
+    validate_config,
+)
 from manifest_builder.helm import pull_chart, run_helm_template
 
 logger = logging.getLogger(__name__)
@@ -147,7 +152,7 @@ def _generate_helm_manifests(
 
 
 def generate_manifests(
-    configs: list[ChartConfig | WebsiteConfig],
+    configs: list[ChartConfig | WebsiteConfig | SimpleConfig],
     output_dir: Path,
     repo_root: Path,
     charts_dir: Path | None = None,
@@ -193,6 +198,13 @@ def generate_manifests(
                     f"Generating manifest for {config.name} ({config.namespace})"
                 )
                 paths = generate_website(config, output_dir, verbose)
+            elif isinstance(config, SimpleConfig):
+                logger.info(
+                    f"Generating manifest for {config.name} ({config.namespace})"
+                )
+                from manifest_builder.simple import generate_simple
+
+                paths = generate_simple(config, output_dir)
             else:
                 paths = _generate_helm_manifests(
                     config, output_dir, charts_dir, verbose

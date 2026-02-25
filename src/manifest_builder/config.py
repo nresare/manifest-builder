@@ -43,11 +43,21 @@ class WebsiteConfig:
     )
 
 
-def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
+@dataclass
+class SimpleConfig:
+    """Configuration for a simple app that copies existing manifests verbatim."""
+
+    name: str
+    namespace: str
+    copy_from: Path  # resolved directory containing manifests to copy
+    config: dict[str, Path] | None = None  # container path -> resolved local path
+
+
+def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleConfig]:
     """
     Load all app configurations from TOML files in the config directory.
 
-    Each TOML file may contain [[helm]] and [[website]] tables.
+    Each TOML file may contain [[helm]], [[website]], and [[simple]] tables.
 
     Args:
         config_dir: Directory containing TOML configuration files
@@ -65,7 +75,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
     if not config_dir.is_dir():
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
-    configs: list[ChartConfig | WebsiteConfig] = []
+    configs: list[ChartConfig | WebsiteConfig | SimpleConfig] = []
     toml_files = list(config_dir.glob("*.toml"))
 
     if not toml_files:
@@ -75,14 +85,19 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig]:
         with open(toml_file, "rb") as f:
             data = tomllib.load(f)
 
-        if "helm" not in data and "website" not in data:
-            raise ValueError(f"No [[helm]] or [[website]] entries found in {toml_file}")
+        if "helm" not in data and "website" not in data and "simple" not in data:
+            raise ValueError(
+                f"No [[helm]], [[website]], or [[simple]] entries found in {toml_file}"
+            )
 
         for helm_data in data.get("helm", []):
             configs.append(_parse_chart_config(helm_data, toml_file))
 
         for website_data in data.get("website", []):
             configs.append(_parse_website_config(website_data, toml_file))
+
+        for simple_data in data.get("simple", []):
+            configs.append(_parse_simple_config(simple_data, toml_file))
 
     return configs
 
@@ -173,9 +188,42 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
     )
 
 
+def _parse_simple_config(data: dict, source_file: Path) -> SimpleConfig:
+    """Parse a simple app configuration from TOML data."""
+    for field in ("namespace", "copy-from"):
+        if field not in data:
+            raise ValueError(f"Missing required field '{field}' in {source_file}")
+
+    config_dir = source_file.parent
+    name = data.get("name", data["namespace"])
+    copy_from = config_dir / data["copy-from"]
+
+    config_dict = None
+    config_data = data.get("config")
+    if config_data is not None:
+        # Support both [simple.config] (dict) and [[simple.config]] (list of dicts)
+        if isinstance(config_data, list):
+            merged: dict[str, str] = {}
+            for item in config_data:
+                merged.update(item)
+            config_data = merged
+        config_dict = {
+            container_path: config_dir / local_path
+            for container_path, local_path in config_data.items()
+        }
+
+    return SimpleConfig(
+        name=name,
+        namespace=data["namespace"],
+        copy_from=copy_from,
+        config=config_dict,
+    )
+
+
 def resolve_configs(
-    configs: list[ChartConfig | WebsiteConfig], helmfile: Helmfile | None
-) -> list[ChartConfig | WebsiteConfig]:
+    configs: list[ChartConfig | WebsiteConfig | SimpleConfig],
+    helmfile: Helmfile | None,
+) -> list[ChartConfig | WebsiteConfig | SimpleConfig]:
     """
     Resolve helmfile release references, filling in chart/repo/version.
 
@@ -203,7 +251,7 @@ def resolve_configs(
     repo_by_name = {r.name: r.url for r in helmfile.repositories}
     release_by_name = {r.name: r for r in helmfile.releases}
 
-    resolved: list[ChartConfig | WebsiteConfig] = []
+    resolved: list[ChartConfig | WebsiteConfig | SimpleConfig] = []
     for config in configs:
         if not isinstance(config, ChartConfig) or config.release is None:
             resolved.append(config)
@@ -245,7 +293,9 @@ def resolve_configs(
     return resolved
 
 
-def validate_config(config: ChartConfig | WebsiteConfig, repo_root: Path) -> None:
+def validate_config(
+    config: ChartConfig | WebsiteConfig | SimpleConfig, repo_root: Path
+) -> None:
     """
     Validate an app configuration.
 
@@ -257,6 +307,23 @@ def validate_config(config: ChartConfig | WebsiteConfig, repo_root: Path) -> Non
         ValueError: If validation fails
     """
     if isinstance(config, WebsiteConfig):
+        for container_path, local_path in (config.config or {}).items():
+            if not local_path.exists():
+                raise ValueError(
+                    f"Config file not found for '{config.name}': {local_path} "
+                    f"(mapped from {container_path})"
+                )
+        return
+
+    if isinstance(config, SimpleConfig):
+        if not config.copy_from.exists():
+            raise ValueError(
+                f"copy-from directory not found for '{config.name}': {config.copy_from}"
+            )
+        if not config.copy_from.is_dir():
+            raise ValueError(
+                f"copy-from path is not a directory for '{config.name}': {config.copy_from}"
+            )
         for container_path, local_path in (config.config or {}).items():
             if not local_path.exists():
                 raise ValueError(
