@@ -155,6 +155,7 @@ def generate_manifests(
     configs: list[ChartConfig | WebsiteConfig | SimpleConfig],
     output_dir: Path,
     repo_root: Path,
+    images: dict[str, str] | None = None,
     charts_dir: Path | None = None,
     verbose: bool = False,
 ) -> set[Path]:
@@ -165,6 +166,7 @@ def generate_manifests(
         configs: List of app configurations
         output_dir: Directory to write generated manifests
         repo_root: Repository root for resolving relative paths
+        images: Dict mapping image variable names to image references for template rendering
         charts_dir: Directory for caching pulled charts (default: repo_root/.charts)
         verbose: If True, log detailed output
 
@@ -197,7 +199,9 @@ def generate_manifests(
                 logger.info(
                     f"Generating manifest for {config.name} ({config.namespace})"
                 )
-                paths = generate_website(config, output_dir, verbose)
+                paths = generate_website(
+                    config, output_dir, images=images, verbose=verbose
+                )
             elif isinstance(config, SimpleConfig):
                 logger.info(
                     f"Generating manifest for {config.name} ({config.namespace})"

@@ -966,3 +966,65 @@ def test_generate_website_no_external_secrets(tmp_path: Path) -> None:
     # Should not have any secret volumes
     secret_volumes = [v for v in volumes if "secret" in v]
     assert len(secret_volumes) == 0
+
+
+def test_generate_website_images_available_in_template(tmp_path: Path) -> None:
+    """Images dict should be available in template context."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    # Create a template that uses image variables
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  template:\n    spec:\n      initContainers:\n      - image: {{git_image}}\n      containers:\n      - image: {{static_web_server_image}}\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production")
+    images = {
+        "git_image": "alpine/git:2.47.2",
+        "static_web_server_image": "ghcr.io/static-web-server/static-web-server:2.36.1",
+    }
+    paths = generate_website(
+        config, tmp_path / "output", images=images, _templates_override=templates_dir
+    )
+
+    (path,) = paths
+    doc = yaml.safe_load(path.read_text())
+    assert (
+        doc["spec"]["template"]["spec"]["initContainers"][0]["image"]
+        == "alpine/git:2.47.2"
+    )
+    assert (
+        doc["spec"]["template"]["spec"]["containers"][0]["image"]
+        == "ghcr.io/static-web-server/static-web-server:2.36.1"
+    )
+
+
+def test_generate_website_bundled_hugo_uses_images(tmp_path: Path) -> None:
+    """Bundled Hugo templates should render image variables from images dict."""
+    config = WebsiteConfig(
+        name="hugo.example.com",
+        namespace="web",
+        hugo_repo="https://github.com/user/repo",
+    )
+    images = {
+        "git_image": "alpine/git:2.47.2",
+        "hugo_image": "floryn90/hugo:0.155.3-alpine",
+        "static_web_server_image": "ghcr.io/static-web-server/static-web-server:2.36.1",
+    }
+    paths = generate_website(config, tmp_path / "output", images=images)
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    # Check that the main web container has the correct image
+    containers = deployment_doc["spec"]["template"]["spec"]["containers"]
+    assert len(containers) == 1
+    assert (
+        containers[0]["image"] == "ghcr.io/static-web-server/static-web-server:2.36.1"
+    )
+
+    # Check that init containers have correct images
+    init_containers = deployment_doc["spec"]["template"]["spec"]["initContainers"]
+    git_container = next(c for c in init_containers if c["name"] == "git")
+    assert git_container["image"] == "alpine/git:2.47.2"
+    hugo_container = next(c for c in init_containers if c["name"] == "hugo")
+    assert hugo_container["image"] == "floryn90/hugo:0.155.3-alpine"

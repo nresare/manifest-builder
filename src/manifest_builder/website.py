@@ -97,6 +97,7 @@ def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]
 def generate_website(
     config: WebsiteConfig,
     output_dir: Path,
+    images: dict[str, str] | None = None,
     verbose: bool = False,
     _templates_override: Path | None = None,  # for testing only
 ) -> set[Path]:
@@ -105,6 +106,7 @@ def generate_website(
     Args:
         config: Website configuration
         output_dir: Directory to write generated manifests
+        images: Dict mapping image variable names to image references (e.g., {"git_image": "alpine/git:2.47.2"})
         verbose: If True, print detailed output
         _templates_override: Override templates directory (for testing only)
 
@@ -128,6 +130,8 @@ def generate_website(
         "name": config.name,
         "k8s_name": _make_k8s_name(config.name),
     }
+    if images:
+        context.update(images)
     if config.image:
         context["image"] = config.image
     if config.args:
