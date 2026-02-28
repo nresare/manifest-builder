@@ -50,16 +50,19 @@ uv sync
 Only create commits when explicitly requested by the user.
 
 **Commit message format:**
-- **First line** (subject): Brief, descriptive summary (keep it short)
-- **Body**: One to two sentences explaining what was changed and why
+- **First line** (subject): One-line summary (keep it short, under 70 characters)
+- **Body**: Exactly two sentences explaining what was changed and why
 - Include the co-author footer: `Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>`
+
+Do not include multiple bullet points or lengthy descriptions in the body. Keep the entire message concise.
 
 Example:
 ```
-Propagate args to Deployment container and simplify extra_hostnames
+Centralize container image definitions in images.yaml
 
-Add args field to container spec with support for string/list formats.
-Simplify extra_hostnames to use ExtraHostname class and add test coverage.
+Move hardcoded image versions from Hugo templates to a centralized images.yaml
+file in the config directory, enabling Renovate to detect and patch stale versions.
+This follows the standard Helm pattern for image management.
 
 Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
 ```
