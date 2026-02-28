@@ -1,5 +1,5 @@
 - name: git
-  image: alpine/git:2.47.2
+  image: {{git_image}}
   command:
   - /bin/sh
   - -c
@@ -13,7 +13,7 @@
     - mountPath: /src
       name: src
 - name: hugo
-  image: floryn90/hugo:0.155.3-alpine
+  image: {{hugo_image}}
   volumeMounts:
     - mountPath: /src
       name: src

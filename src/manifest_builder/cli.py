@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from manifest_builder._version import __version__
-from manifest_builder.config import load_configs, resolve_configs
+from manifest_builder.config import load_configs, load_images, resolve_configs
 from manifest_builder.generator import generate_manifests, setup_logging
 from manifest_builder.git_utils import (
     create_manifest_commit,
@@ -99,11 +99,15 @@ def main(
         if verbose:
             click.echo(f"Loaded {len(configs)} chart configuration(s)")
 
+        # Load container image definitions
+        images = load_images(config_dir)
+
         # Generate manifests
         written_paths = generate_manifests(
             configs=configs,
             output_dir=output_dir,
             repo_root=repo_root,
+            images=images,
             verbose=verbose,
         )
 

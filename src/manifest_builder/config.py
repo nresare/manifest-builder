@@ -6,6 +6,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from manifest_builder.helmfile import Helmfile
 
 
@@ -51,6 +53,59 @@ class SimpleConfig:
     namespace: str
     copy_from: Path  # resolved directory containing manifests to copy
     config: dict[str, Path] | None = None  # container path -> resolved local path
+
+
+def load_images(config_dir: Path) -> dict[str, str]:
+    """
+    Load container image definitions from images.yaml in the config directory.
+
+    The images.yaml file should have the format:
+        images:
+          git:
+            repo: alpine/git
+            version: 2.47.2
+          hugo:
+            repo: floryn90/hugo
+            version: 0.155.3-alpine
+
+    Returns a dict mapping template variable names to image references, e.g.:
+        {"git_image": "alpine/git:2.47.2", "hugo_image": "floryn90/hugo:0.155.3-alpine"}
+
+    Args:
+        config_dir: Directory containing images.yaml
+
+    Returns:
+        Dict mapping image variable names to full image references (repo:version)
+
+    Raises:
+        FileNotFoundError: If images.yaml is not found in config_dir
+        ValueError: If images.yaml is invalid or missing required fields
+    """
+    images_file = config_dir / "images.yaml"
+    if not images_file.exists():
+        raise FileNotFoundError(f"images.yaml not found in {config_dir}")
+
+    with images_file.open() as f:
+        data = yaml.safe_load(f)
+
+    if not data or "images" not in data:
+        raise ValueError(f"images.yaml must contain 'images' key in {config_dir}")
+
+    result = {}
+    for key, image_def in data.get("images", {}).items():
+        if (
+            not isinstance(image_def, dict)
+            or "repo" not in image_def
+            or "version" not in image_def
+        ):
+            raise ValueError(
+                f"Each image in images.yaml must have 'repo' and 'version' fields. "
+                f"Invalid entry: {key}"
+            )
+        var_name = key.replace("-", "_") + "_image"
+        result[var_name] = f"{image_def['repo']}:{image_def['version']}"
+
+    return result
 
 
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleConfig]:

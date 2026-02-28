@@ -2,7 +2,7 @@ env:
   - name: SERVER_PORT
     value: "8080"
 name: web
-image: ghcr.io/static-web-server/static-web-server:2.36.1
+image: {{static_web_server_image}}
 volumeMounts:
   - mountPath: /public
     name: public
