@@ -270,7 +270,11 @@ def _ensure_namespaces(
 
     new_paths: dict[Path, str] = {}
     for ns_dir in sorted(output_dir.iterdir()):
-        if not ns_dir.is_dir() or ns_dir.name == "cluster":
+        if (
+            not ns_dir.is_dir()
+            or ns_dir.name == "cluster"
+            or ns_dir.name == "kube-system"
+        ):
             continue
 
         ns_name = ns_dir.name
