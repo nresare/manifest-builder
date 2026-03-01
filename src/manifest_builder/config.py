@@ -6,8 +6,6 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
 from manifest_builder.helmfile import Helmfile
 
 
@@ -57,49 +55,48 @@ class SimpleConfig:
 
 def load_images(config_dir: Path) -> dict[str, str]:
     """
-    Load container image definitions from images.yaml in the config directory.
+    Load container image definitions from images.toml in the config directory.
 
-    The images.yaml file should have the format:
-        images:
-          git:
-            repo: alpine/git
-            version: 2.47.2
-          hugo:
-            repo: floryn90/hugo
-            version: 0.155.3-alpine
+    The images.toml file should have the format:
+        [git]
+        repo = "alpine/git"
+        version = "2.47.2"
+
+        [hugo]
+        repo = "floryn90/hugo"
+        version = "0.155.3-alpine"
 
     Returns a dict mapping template variable names to image references, e.g.:
         {"git_image": "alpine/git:2.47.2", "hugo_image": "floryn90/hugo:0.155.3-alpine"}
 
     Args:
-        config_dir: Directory containing images.yaml
+        config_dir: Directory containing images.toml
 
     Returns:
         Dict mapping image variable names to full image references (repo:version)
 
     Raises:
-        FileNotFoundError: If images.yaml is not found in config_dir
-        ValueError: If images.yaml is invalid or missing required fields
+        FileNotFoundError: If images.toml is not found in config_dir
+        ValueError: If images.toml is invalid or missing required fields
     """
-    images_file = config_dir / "images.yaml"
+    images_file = config_dir / "images.toml"
     if not images_file.exists():
-        raise FileNotFoundError(f"images.yaml not found in {config_dir}")
+        raise FileNotFoundError(f"images.toml not found in {config_dir}")
 
-    with images_file.open() as f:
-        data = yaml.safe_load(f)
+    data = tomllib.loads(images_file.read_text())
 
-    if not data or "images" not in data:
-        raise ValueError(f"images.yaml must contain 'images' key in {config_dir}")
+    if not data:
+        raise ValueError(f"images.toml is empty in {config_dir}")
 
     result = {}
-    for key, image_def in data.get("images", {}).items():
+    for key, image_def in data.items():
         if (
             not isinstance(image_def, dict)
             or "repo" not in image_def
             or "version" not in image_def
         ):
             raise ValueError(
-                f"Each image in images.yaml must have 'repo' and 'version' fields. "
+                f"Each image in images.toml must have 'repo' and 'version' fields. "
                 f"Invalid entry: {key}"
             )
         var_name = key.replace("-", "_") + "_image"
@@ -131,7 +128,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
     configs: list[ChartConfig | WebsiteConfig | SimpleConfig] = []
-    toml_files = list(config_dir.glob("*.toml"))
+    toml_files = [f for f in config_dir.glob("*.toml") if f.name != "images.toml"]
 
     if not toml_files:
         raise FileNotFoundError(f"No TOML files found in {config_dir}")

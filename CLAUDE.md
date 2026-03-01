@@ -58,9 +58,9 @@ Do not include multiple bullet points or lengthy descriptions in the body. Keep 
 
 Example:
 ```
-Centralize container image definitions in images.yaml
+Centralize container image definitions in images.toml
 
-Move hardcoded image versions from Hugo templates to a centralized images.yaml
+Move hardcoded image versions from Hugo templates to a centralized images.toml
 file in the config directory, enabling Renovate to detect and patch stale versions.
 This follows the standard Helm pattern for image management.
 

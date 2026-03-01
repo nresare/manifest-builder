@@ -932,19 +932,20 @@ def test_load_images_returns_image_dict(tmp_path: Path) -> None:
     """load_images should return dict mapping variable names to image references."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
-    (conf_dir / "images.yaml").write_text(
+    (conf_dir / "images.toml").write_text(
         textwrap.dedent(
             """\
-            images:
-              git:
-                repo: alpine/git
-                version: 2.47.2
-              hugo:
-                repo: floryn90/hugo
-                version: 0.155.3-alpine
-              static-web-server:
-                repo: ghcr.io/static-web-server/static-web-server
-                version: 2.36.1
+            [git]
+            repo = "alpine/git"
+            version = "2.47.2"
+
+            [hugo]
+            repo = "floryn90/hugo"
+            version = "0.155.3-alpine"
+
+            [static-web-server]
+            repo = "ghcr.io/static-web-server/static-web-server"
+            version = "2.36.1"
             """
         )
     )
@@ -959,11 +960,11 @@ def test_load_images_returns_image_dict(tmp_path: Path) -> None:
 
 
 def test_load_images_raises_when_missing(tmp_path: Path) -> None:
-    """load_images should raise FileNotFoundError when images.yaml is missing."""
+    """load_images should raise FileNotFoundError when images.toml is missing."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
 
-    with pytest.raises(FileNotFoundError, match="images.yaml not found"):
+    with pytest.raises(FileNotFoundError, match="images.toml not found"):
         load_images(conf_dir)
 
 
@@ -971,13 +972,12 @@ def test_load_images_converts_hyphens_to_underscores(tmp_path: Path) -> None:
     """load_images should convert hyphenated keys to underscored variable names."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
-    (conf_dir / "images.yaml").write_text(
+    (conf_dir / "images.toml").write_text(
         textwrap.dedent(
             """\
-            images:
-              my-custom-image:
-                repo: example.com/my-image
-                version: 1.0.0
+            [my-custom-image]
+            repo = "example.com/my-image"
+            version = "1.0.0"
             """
         )
     )
@@ -988,13 +988,13 @@ def test_load_images_converts_hyphens_to_underscores(tmp_path: Path) -> None:
     assert images["my_custom_image_image"] == "example.com/my-image:1.0.0"
 
 
-def test_load_images_raises_on_missing_images_key(tmp_path: Path) -> None:
-    """load_images should raise ValueError if 'images' key is missing."""
+def test_load_images_raises_on_empty_file(tmp_path: Path) -> None:
+    """load_images should raise ValueError if images.toml is empty."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
-    (conf_dir / "images.yaml").write_text("other_key: value\n")
+    (conf_dir / "images.toml").write_text("")
 
-    with pytest.raises(ValueError, match="must contain 'images' key"):
+    with pytest.raises(ValueError, match="images.toml is empty"):
         load_images(conf_dir)
 
 
@@ -1002,12 +1002,11 @@ def test_load_images_raises_on_invalid_entry(tmp_path: Path) -> None:
     """load_images should raise ValueError if an image entry is missing required fields."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
-    (conf_dir / "images.yaml").write_text(
+    (conf_dir / "images.toml").write_text(
         textwrap.dedent(
             """\
-            images:
-              git:
-                repo: alpine/git
+            [git]
+            repo = "alpine/git"
             """
         )
     )
