@@ -283,7 +283,7 @@ def resolve_configs(
 
     Args:
         configs: App configs as parsed from TOML
-        helmfile: Parsed helmfile.yaml, or None if not present
+        helmfile: Parsed releases.yaml, or None if not present
 
     Returns:
         Configs with all release references resolved
@@ -297,7 +297,7 @@ def resolve_configs(
     if helmfile is None:
         names = [c.name for c in configs if isinstance(c, ChartConfig) and c.release]
         raise ValueError(
-            f"Charts {names} reference helmfile releases but no helmfile.yaml was found"
+            f"Charts {names} reference helmfile releases but no releases.yaml was found"
         )
 
     repo_by_name = {r.name: r.url for r in helmfile.repositories}
@@ -311,7 +311,7 @@ def resolve_configs(
 
         release_name = config.release
         if release_name not in release_by_name:
-            raise ValueError(f"Release '{release_name}' not found in helmfile.yaml")
+            raise ValueError(f"Release '{release_name}' not found in releases.yaml")
 
         hf_release = release_by_name[release_name]
 
@@ -326,7 +326,7 @@ def resolve_configs(
         if repo_name not in repo_by_name:
             raise ValueError(
                 f"Repository '{repo_name}' referenced by release '{release_name}' "
-                "not found in helmfile.yaml repositories"
+                "not found in releases.yaml repositories"
             )
 
         resolved.append(
