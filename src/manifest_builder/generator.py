@@ -505,10 +505,11 @@ def write_manifests(
     # Filter out Helm test hook documents and log them
     filtered_documents = []
     for doc in documents:
-        if doc.get("metadata", {}).get("annotations", {}).get("helm.sh/hook") == "test":
+        hook_value = doc.get("metadata", {}).get("annotations", {}).get("helm.sh/hook")
+        if hook_value is not None:
             kind = doc.get("kind")
             name = doc.get("metadata", {}).get("name")
-            logger.info(f"Skipping {kind} {name} (helm.sh/hook=test)")
+            logger.info(f"Skipping {kind} {name} (helm.sh/hook={hook_value})")
         else:
             filtered_documents.append(doc)
     documents = filtered_documents
