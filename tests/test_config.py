@@ -511,6 +511,42 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
     assert resolved == [config]
 
 
+def test_resolve_configs_oci_repository() -> None:
+    """OCI repositories use chart name only (not repo/chart format)."""
+    helmfile = Helmfile(
+        repositories=[
+            HelmfileRepository(
+                name="envoyproxy",
+                url="oci://docker.io/envoyproxy/gateway-helm",
+            )
+        ],
+        releases=[
+            HelmfileRelease(
+                name="envoy-gateway",
+                chart="envoyproxy",
+                version="v1.3.3",
+                namespace="default",
+            )
+        ],
+    )
+    config = ChartConfig(
+        name="envoy-gateway",
+        namespace="default",
+        chart=None,
+        repo=None,
+        version=None,
+        values=[],
+        release="envoy-gateway",
+    )
+    resolved = resolve_configs([config], helmfile)
+    assert len(resolved) == 1
+    resolved_config = resolved[0]
+    assert isinstance(resolved_config, ChartConfig)
+    assert resolved_config.chart == "envoyproxy"
+    assert resolved_config.repo == "oci://docker.io/envoyproxy/gateway-helm"
+    assert resolved_config.version == "v1.3.3"
+
+
 def test_load_website_config_with_config(tmp_path: Path) -> None:
     """Website config can specify config with local paths."""
     conf_dir = tmp_path / "conf"

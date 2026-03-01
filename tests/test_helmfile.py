@@ -93,3 +93,32 @@ def test_load_helmfile_empty_sections(tmp_path: Path) -> None:
     hf = load_helmfile(tmp_path / "releases.yaml")
     assert hf.repositories == []
     assert hf.releases == []
+
+
+def test_load_helmfile_oci_repository(tmp_path: Path) -> None:
+    write_helmfile(
+        tmp_path,
+        """\
+        repositories:
+          - name: envoyproxy
+            url: oci://docker.io/envoyproxy/gateway-helm
+        releases:
+          - name: envoy-gateway
+            chart: envoyproxy
+            version: v1.3.3
+            namespace: envoy-gateway
+        """,
+    )
+
+    hf = load_helmfile(tmp_path / "releases.yaml")
+
+    assert len(hf.repositories) == 1
+    assert hf.repositories[0].name == "envoyproxy"
+    assert hf.repositories[0].url == "oci://docker.io/envoyproxy/gateway-helm"
+
+    assert len(hf.releases) == 1
+    rel = hf.releases[0]
+    assert rel.name == "envoy-gateway"
+    assert rel.chart == "envoyproxy"
+    assert rel.version == "v1.3.3"
+    assert rel.namespace == "envoy-gateway"
