@@ -127,6 +127,23 @@ def _generate_helm_manifests(
     )
     paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
 
+    # Handle CRDs from the chart's crds directory (helm template doesn't include these)
+    chart_dir_path = Path(chart_path)
+    if chart_dir_path.is_dir():
+        crds_dir = chart_dir_path / "crds"
+        if crds_dir.is_dir():
+            crd_docs: list[dict] = []
+            for yaml_file in sorted(crds_dir.glob("**/*.yaml")):
+                for doc in yaml.safe_load_all(yaml_file.read_text()):
+                    if doc:
+                        crd_docs.append(doc)
+            if crd_docs:
+                crd_paths = _write_documents(
+                    crd_docs, output_dir, config.namespace, config.name
+                )
+                paths.update(crd_paths)
+                logger.info(f"Copied {len(crd_docs)} CRD(s)")
+
     # Handle extra resources if configured
     if config.extra_resources:
         extra_docs: list[dict] = []
