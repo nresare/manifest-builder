@@ -242,7 +242,7 @@ dependencies = [
     { name = "pyyaml" },
 ]
 
-[package.dev-dependencies]
+[package.optional-dependencies]
 dev = [
     { name = "pytest" },
     { name = "ruff" },
@@ -254,16 +254,13 @@ dev = [
 requires-dist = [
     { name = "click" },
     { name = "pystache" },
+    { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyyaml" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "simple503", marker = "extra == 'dev'" },
+    { name = "ty", marker = "extra == 'dev'" },
 ]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "simple503" },
-    { name = "ty" },
-]
+provides-extras = ["dev"]
 
 [[package]]
 name = "mistletoe"

@@ -208,7 +208,7 @@ def generate_manifests(
                 )
                 from manifest_builder.simple import generate_simple
 
-                paths = generate_simple(config, output_dir)
+                paths = generate_simple(config, output_dir, images=images)
             else:
                 paths = _generate_helm_manifests(
                     config, output_dir, charts_dir, verbose
