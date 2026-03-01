@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+import pystache
+import pytest
 import yaml
 
 from manifest_builder.config import SimpleConfig
@@ -210,3 +212,64 @@ spec:
 
     configmaps = [p for p in paths if "configmap" in p.name]
     assert configmaps == []
+
+
+# ---------------------------------------------------------------------------
+# Image templating
+# ---------------------------------------------------------------------------
+
+
+def test_generate_simple_with_images_renders_template(tmp_path: Path) -> None:
+    """Manifests are rendered as Mustache templates when images are provided."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "deployment.yaml").write_text(
+        """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: "{{my_app_image}}"
+"""
+    )
+
+    output_dir = tmp_path / "output"
+    config = _make_config(tmp_path, manifests_dir, name="my-app", namespace="default")
+    images = {"my_app_image": "example.com/my-app:1.2.3"}
+    paths = generate_simple(config, output_dir, images=images)
+
+    assert len(paths) == 1
+    out = _read_yaml(next(iter(paths)))
+    container = out["spec"]["template"]["spec"]["containers"][0]
+    assert container["image"] == "example.com/my-app:1.2.3"
+
+
+def test_generate_simple_raises_on_missing_image(tmp_path: Path) -> None:
+    """Manifest generation fails if a template variable is missing from images."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "deployment.yaml").write_text(
+        """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: "{{my_app_image}}"
+"""
+    )
+
+    output_dir = tmp_path / "output"
+    config = _make_config(tmp_path, manifests_dir, name="my-app", namespace="default")
+
+    with pytest.raises(pystache.context.KeyNotFoundError):
+        generate_simple(config, output_dir, images=None)
