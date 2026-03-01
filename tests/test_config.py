@@ -323,7 +323,7 @@ def test_resolve_configs_no_helmfile_raises_when_release_present(
         values=[],
         release="myapp",
     )
-    with pytest.raises(ValueError, match="no helmfile.yaml was found"):
+    with pytest.raises(ValueError, match="no releases.yaml was found"):
         resolve_configs([config], None)
 
 
@@ -337,7 +337,7 @@ def test_resolve_configs_unknown_release_raises() -> None:
         values=[],
         release="unknown",
     )
-    with pytest.raises(ValueError, match="not found in helmfile.yaml"):
+    with pytest.raises(ValueError, match="not found in releases.yaml"):
         resolve_configs([config], _make_helmfile())
 
 
@@ -505,6 +505,7 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
         version=None,
         values=[],
         release=None,
+        extra_resources=None,
     )
     resolved = resolve_configs([config], None)
     assert resolved == [config]

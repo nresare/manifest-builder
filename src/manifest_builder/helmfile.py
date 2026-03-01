@@ -18,7 +18,7 @@ class HelmfileRepository:
 
 @dataclass
 class HelmfileRelease:
-    """A release entry from helmfile.yaml."""
+    """A release entry from releases.yaml."""
 
     name: str
     chart: str  # "reponame/chartname" format
@@ -28,7 +28,7 @@ class HelmfileRelease:
 
 @dataclass
 class Helmfile:
-    """Parsed helmfile.yaml content."""
+    """Parsed releases.yaml content."""
 
     repositories: list[HelmfileRepository]
     releases: list[HelmfileRelease]
@@ -36,10 +36,10 @@ class Helmfile:
 
 def load_helmfile(path: Path) -> Helmfile:
     """
-    Parse a helmfile.yaml file.
+    Parse a releases.yaml file.
 
     Args:
-        path: Path to helmfile.yaml
+        path: Path to releases.yaml
 
     Returns:
         Parsed helmfile with repositories and releases
@@ -49,13 +49,13 @@ def load_helmfile(path: Path) -> Helmfile:
         ValueError: If the file is malformed
     """
     if not path.exists():
-        raise FileNotFoundError(f"helmfile.yaml not found: {path}")
+        raise FileNotFoundError(f"releases.yaml not found: {path}")
 
     with open(path) as f:
         data = yaml.safe_load(f)
 
     if not isinstance(data, dict):
-        raise ValueError(f"helmfile.yaml must be a YAML mapping: {path}")
+        raise ValueError(f"releases.yaml must be a YAML mapping: {path}")
 
     repositories: list[HelmfileRepository] = []
     for repo in data.get("repositories") or []:

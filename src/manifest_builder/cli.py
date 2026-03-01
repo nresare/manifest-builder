@@ -85,11 +85,11 @@ def main(
             click.echo()
 
         # Load the helmfile if present
-        helmfile_path = config_dir / "helmfile.yaml"
+        helmfile_path = config_dir / "releases.yaml"
         helmfile_data = load_helmfile(helmfile_path) if helmfile_path.exists() else None
         if verbose and helmfile_data is not None:
             click.echo(
-                f"Loaded helmfile.yaml: {len(helmfile_data.releases)} release(s)"
+                f"Loaded releases.yaml: {len(helmfile_data.releases)} release(s)"
             )
 
         # Load and resolve the configurations
