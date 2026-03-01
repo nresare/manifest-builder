@@ -68,9 +68,13 @@ def pull_chart(
 
     Skips the pull if the destination already exists.
 
+    Supports both traditional HTTP/HTTPS repositories and OCI registries.
+    For OCI registries (repo URLs starting with oci://), the chart reference
+    is the OCI URL itself, and the actual chart name is extracted from the URL.
+
     Args:
-        chart: Chart name within the repository
-        repo: Repository URL
+        chart: Chart name within the repository (repo reference for OCI, chart name for HTTP/HTTPS)
+        repo: Repository URL (HTTP/HTTPS or OCI format)
         dest: Directory to untar the chart into
         version: Optional chart version
 
@@ -80,7 +84,17 @@ def pull_chart(
     Raises:
         RuntimeError: If helm pull fails
     """
-    chart_dir = dest / chart
+    # Determine if this is an OCI registry
+    is_oci = repo.startswith("oci://")
+
+    # For OCI repos, extract the actual chart name from the URL (last component)
+    # For HTTP/HTTPS repos, use the provided chart name
+    if is_oci:
+        actual_chart_name = repo.rstrip("/").split("/")[-1]
+    else:
+        actual_chart_name = chart
+
+    chart_dir = dest / actual_chart_name
 
     if chart_dir.exists():
         logger.debug(f"Using cached chart at {chart_dir}")
@@ -91,19 +105,22 @@ def pull_chart(
     version_str = f" (version {version})" if version else ""
     logger.info(f"Downloading chart {chart} from {repo}{version_str}")
 
-    cmd = [
-        "helm",
-        "pull",
-        chart,
-        "--repo",
-        repo,
-        "--untar",
-        "--untardir",
-        str(dest),
-    ]
+    cmd = ["helm", "pull"]
+
+    if is_oci:
+        # For OCI registries, the repo URL is the full chart reference
+        cmd.append(repo)
+    else:
+        # For HTTP/HTTPS repositories, use --repo flag with chart name
+        cmd.append(chart)
+        cmd.extend(["--repo", repo])
+
+    cmd.extend(["--untar", "--untardir", str(dest)])
 
     if version:
         cmd.extend(["--version", version])
+
+    logger.debug(f"Executing: {' '.join(cmd)}")
 
     try:
         subprocess.run(
@@ -115,9 +132,15 @@ def pull_chart(
         )
         logger.debug(f"Successfully unpacked chart to {chart_dir}")
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"helm pull failed for {chart}: {e.stderr}") from e
+        cmd_str = " ".join(cmd)
+        raise RuntimeError(
+            f"helm pull failed for {chart}:\n  Command: {cmd_str}\n  Error: {e.stderr}"
+        ) from e
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"helm pull timed out for {chart}") from e
+        cmd_str = " ".join(cmd)
+        raise RuntimeError(
+            f"helm pull timed out for {chart}:\n  Command: {cmd_str}"
+        ) from e
 
     return chart_dir
 
@@ -166,6 +189,8 @@ def run_helm_template(
     if version:
         cmd.extend(["--version", version])
 
+    logger.debug(f"Executing: {' '.join(cmd)}")
+
     try:
         result = subprocess.run(
             cmd,
@@ -176,8 +201,12 @@ def run_helm_template(
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
+        cmd_str = " ".join(cmd)
         raise RuntimeError(
-            f"helm template failed for {release_name}: {e.stderr}"
+            f"helm template failed for {release_name}:\n  Command: {cmd_str}\n  Error: {e.stderr}"
         ) from e
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"helm template timed out for {release_name}") from e
+        cmd_str = " ".join(cmd)
+        raise RuntimeError(
+            f"helm template timed out for {release_name}:\n  Command: {cmd_str}"
+        ) from e

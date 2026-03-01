@@ -315,13 +315,15 @@ def resolve_configs(
 
         hf_release = release_by_name[release_name]
 
+        # Handle both traditional (repo/chart) and OCI (chart-only with repo name match) formats
         parts = hf_release.chart.split("/", 1)
-        if len(parts) != 2:
-            raise ValueError(
-                f"helmfile release '{release_name}' chart '{hf_release.chart}' "
-                "must be in 'reponame/chartname' format"
-            )
-        repo_name, chart_name = parts
+        if len(parts) == 2:
+            # Traditional format: reponame/chartname
+            repo_name, chart_name = parts
+        else:
+            # OCI or single-name format: try to match chart name to a repository
+            chart_name = hf_release.chart
+            repo_name = chart_name
 
         if repo_name not in repo_by_name:
             raise ValueError(
