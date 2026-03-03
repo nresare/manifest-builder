@@ -12,7 +12,9 @@ spec:
       tls:
         certificateRefs:
           - name: {{k8s_name}}-tls
-{{#extra_hostnames}}
+            group: ""
+            kind: Secret
+  {{#extra_hostnames}}
     - name: {{k8s_hostname}}
       protocol: HTTPS
       hostname: {{hostname}}
@@ -20,4 +22,6 @@ spec:
       tls:
         certificateRefs:
           - name: {{k8s_name}}-extra-tls
+            group: ""
+            kind: Secret
 {{/extra_hostnames}}
