@@ -5,6 +5,8 @@ metadata:
 spec:
   parentRefs:
     - name: {{k8s_name}}
+      group: gateway.networking.k8s.io
+      kind: Gateway
   hostnames:
     - {{name}}
 {{#extra_hostnames}}
@@ -14,3 +16,10 @@ spec:
     - backendRefs:
         - name: {{k8s_name}}
           port: 80
+          group: ""
+          kind: Service
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
