@@ -300,7 +300,9 @@ def resolve_configs(
             f"Charts {names} reference helmfile releases but no releases.yaml was found"
         )
 
-    repo_by_name = {r.name: r.url for r in helmfile.repositories}
+    repo_by_name = {
+        r.name: (f"oci://{r.url}" if r.oci else r.url) for r in helmfile.repositories
+    }
     release_by_name = {r.name: r for r in helmfile.releases}
 
     resolved: list[ChartConfig | WebsiteConfig | SimpleConfig] = []

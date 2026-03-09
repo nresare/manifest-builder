@@ -517,7 +517,8 @@ def test_resolve_configs_oci_repository() -> None:
         repositories=[
             HelmfileRepository(
                 name="envoyproxy",
-                url="oci://docker.io/envoyproxy/gateway-helm",
+                url="docker.io/envoyproxy/gateway-helm",
+                oci=True,
             )
         ],
         releases=[

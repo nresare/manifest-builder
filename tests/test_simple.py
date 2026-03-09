@@ -5,6 +5,7 @@
 from pathlib import Path
 
 import pystache
+import pystache.context
 import pytest
 import yaml
 
