@@ -101,7 +101,8 @@ def test_load_helmfile_oci_repository(tmp_path: Path) -> None:
         """\
         repositories:
           - name: envoyproxy
-            url: oci://docker.io/envoyproxy/gateway-helm
+            url: docker.io/envoyproxy/gateway-helm
+            oci: true
         releases:
           - name: envoy-gateway
             chart: envoyproxy
@@ -114,7 +115,8 @@ def test_load_helmfile_oci_repository(tmp_path: Path) -> None:
 
     assert len(hf.repositories) == 1
     assert hf.repositories[0].name == "envoyproxy"
-    assert hf.repositories[0].url == "oci://docker.io/envoyproxy/gateway-helm"
+    assert hf.repositories[0].url == "docker.io/envoyproxy/gateway-helm"
+    assert hf.repositories[0].oci is True
 
     assert len(hf.releases) == 1
     rel = hf.releases[0]

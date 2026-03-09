@@ -14,6 +14,7 @@ class HelmfileRepository:
 
     name: str
     url: str
+    oci: bool = False
 
 
 @dataclass
@@ -61,7 +62,13 @@ def load_helmfile(path: Path) -> Helmfile:
     for repo in data.get("repositories") or []:
         if "name" not in repo or "url" not in repo:
             raise ValueError(f"Each repository entry requires 'name' and 'url': {path}")
-        repositories.append(HelmfileRepository(name=repo["name"], url=repo["url"]))
+        repositories.append(
+            HelmfileRepository(
+                name=repo["name"],
+                url=repo["url"],
+                oci=bool(repo.get("oci", False)),
+            )
+        )
 
     releases: list[HelmfileRelease] = []
     for rel in data.get("releases") or []:
