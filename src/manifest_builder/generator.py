@@ -105,16 +105,36 @@ def _generate_helm_manifests(
 
     values_paths = config.values
 
-    # Pull the chart from the repo if configured
-    if config.repo:
+    # Pull the chart from the repo if configured (traditional or OCI)
+    if config.repo or (config.chart and config.chart.startswith("oci://")):
         version_suffix = f"-{config.version}" if config.version else ""
-        pull_dest = charts_dir / f"{config.chart}{version_suffix}"
-        if (pull_dest / config.chart).exists():
-            logger.debug(f"Using cached chart at {pull_dest / config.chart}")
+
+        # Create a filesystem-safe directory name for the cache
+        if config.chart.startswith("oci://"):
+            chart_slug = config.chart.replace("oci://", "").replace("/", "_")
         else:
-            logger.debug(f"Pulling chart to {pull_dest / config.chart}")
+            chart_slug = config.chart
+
+        pull_dest = charts_dir / f"{chart_slug}{version_suffix}"
+
+        # Determine the actual chart name to check for existence
+        if config.chart.startswith("oci://"):
+            actual_chart_name = config.chart.rstrip("/").split("/")[-1]
+        else:
+            actual_chart_name = config.chart
+
+        if (pull_dest / actual_chart_name).exists():
+            logger.debug(f"Using cached chart at {pull_dest / actual_chart_name}")
+        else:
+            logger.debug(f"Pulling chart to {pull_dest / actual_chart_name}")
+
         chart_path = str(
-            pull_chart(config.chart, config.repo, pull_dest, config.version)
+            pull_chart(
+                chart=config.chart,
+                dest=pull_dest,
+                repo=config.repo,
+                version=config.version,
+            )
         )
     else:
         chart_path = config.chart

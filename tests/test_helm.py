@@ -13,7 +13,7 @@ def test_pull_chart_uses_cached_chart(tmp_path: Path) -> None:
     chart_dir = tmp_path / "myapp"
     chart_dir.mkdir()
 
-    result = pull_chart("myapp", "https://charts.example.com", tmp_path)
+    result = pull_chart("myapp", tmp_path, repo="https://charts.example.com")
 
     assert result == chart_dir
 
@@ -24,9 +24,7 @@ def test_pull_chart_oci_uses_cached_chart(tmp_path: Path) -> None:
     chart_dir = tmp_path / "gateway-helm"
     chart_dir.mkdir()
 
-    result = pull_chart(
-        "envoyproxy", "oci://docker.io/envoyproxy/gateway-helm", tmp_path
-    )
+    result = pull_chart("oci://docker.io/envoyproxy/gateway-helm", tmp_path)
 
     assert result == chart_dir
 
@@ -36,7 +34,9 @@ def test_pull_chart_http_repository(mock_run: MagicMock, tmp_path: Path) -> None
     """pull_chart should use --repo for HTTP/HTTPS repositories."""
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-    pull_chart("cert-manager", "https://charts.jetstack.io", tmp_path, "v1.19.4")
+    pull_chart(
+        "cert-manager", tmp_path, repo="https://charts.jetstack.io", version="v1.19.4"
+    )
 
     # Verify the command structure
     call_args = mock_run.call_args
@@ -56,9 +56,7 @@ def test_pull_chart_oci_repository(mock_run: MagicMock, tmp_path: Path) -> None:
     """pull_chart should use OCI URL directly without --repo for OCI registries."""
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-    pull_chart(
-        "envoyproxy", "oci://docker.io/envoyproxy/gateway-helm", tmp_path, "v1.3.3"
-    )
+    pull_chart("oci://docker.io/envoyproxy/gateway-helm", tmp_path, version="v1.3.3")
 
     # Verify the command structure
     call_args = mock_run.call_args
@@ -79,7 +77,7 @@ def test_pull_chart_oci_without_version(mock_run: MagicMock, tmp_path: Path) -> 
     """pull_chart should work for OCI registries without a version."""
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-    pull_chart("envoyproxy", "oci://docker.io/envoyproxy/gateway-helm", tmp_path)
+    pull_chart("oci://docker.io/envoyproxy/gateway-helm", tmp_path)
 
     # Verify the command structure
     call_args = mock_run.call_args

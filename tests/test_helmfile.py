@@ -36,6 +36,7 @@ def test_load_helmfile_repositories_and_releases(tmp_path: Path) -> None:
     assert len(hf.repositories) == 1
     assert hf.repositories[0].name == "jetstack"
     assert hf.repositories[0].url == "https://charts.jetstack.io"
+    assert not hf.repositories[0].oci
 
     assert len(hf.releases) == 1
     rel = hf.releases[0]
@@ -101,26 +102,25 @@ def test_load_helmfile_oci_repository(tmp_path: Path) -> None:
         """\
         repositories:
           - name: envoyproxy
-            url: docker.io/envoyproxy/gateway-helm
+            url: docker.io/envoyproxy
             oci: true
         releases:
           - name: envoy-gateway
-            chart: envoyproxy
-            version: v1.3.3
-            namespace: envoy-gateway
+            chart: envoyproxy/gateway-helm
+            version: v1.7.0
         """,
     )
 
     hf = load_helmfile(tmp_path / "releases.yaml")
 
     assert len(hf.repositories) == 1
-    assert hf.repositories[0].name == "envoyproxy"
-    assert hf.repositories[0].url == "docker.io/envoyproxy/gateway-helm"
-    assert hf.repositories[0].oci is True
+    repo = hf.repositories[0]
+    assert repo.name == "envoyproxy"
+    assert repo.url == "docker.io/envoyproxy"
+    assert repo.oci
 
     assert len(hf.releases) == 1
     rel = hf.releases[0]
     assert rel.name == "envoy-gateway"
-    assert rel.chart == "envoyproxy"
-    assert rel.version == "v1.3.3"
-    assert rel.namespace == "envoy-gateway"
+    assert rel.chart == "envoyproxy/gateway-helm"
+    assert rel.version == "v1.7.0"
