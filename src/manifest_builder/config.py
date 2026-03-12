@@ -317,15 +317,13 @@ def resolve_configs(
 
         hf_release = release_by_name[release_name]
 
-        # Handle both traditional (repo/chart) and OCI (chart-only with repo name match) formats
         parts = hf_release.chart.split("/", 1)
-        if len(parts) == 2:
-            # Traditional format: reponame/chartname
-            repo_name, chart_name = parts
-        else:
-            # OCI or single-name format: try to match chart name to a repository
-            chart_name = hf_release.chart
-            repo_name = chart_name
+        if len(parts) != 2:
+            raise ValueError(
+                f"helmfile release '{release_name}' chart '{hf_release.chart}' "
+                "must be in 'reponame/chartname' format"
+            )
+        repo_name, chart_name = parts
 
         if repo_name not in repo_by_name:
             raise ValueError(
@@ -333,12 +331,24 @@ def resolve_configs(
                 "not found in releases.yaml repositories"
             )
 
+        repo_url = repo_by_name[repo_name]
+
+        if repo_url.startswith("oci://"):
+            # Construct the full OCI URL
+            base_url = repo_url.rstrip("/")
+            full_oci_url = f"{base_url}/{chart_name}"
+            resolved_chart = full_oci_url
+            resolved_repo = None  # OCI doesn't use --repo
+        else:
+            resolved_chart = chart_name
+            resolved_repo = repo_url
+
         resolved.append(
             ChartConfig(
                 name=config.name,
                 namespace=config.namespace,
-                chart=chart_name,
-                repo=repo_by_name[repo_name],
+                chart=resolved_chart,
+                repo=resolved_repo,
                 version=hf_release.version,
                 values=config.values,
                 release=config.release,

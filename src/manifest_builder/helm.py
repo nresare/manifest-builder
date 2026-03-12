@@ -59,8 +59,8 @@ def check_helm_available() -> bool:
 
 def pull_chart(
     chart: str,
-    repo: str,
     dest: Path,
+    repo: str | None = None,
     version: str | None = None,
 ) -> Path:
     """
@@ -68,14 +68,10 @@ def pull_chart(
 
     Skips the pull if the destination already exists.
 
-    Supports both traditional HTTP/HTTPS repositories and OCI registries.
-    For OCI registries (repo URLs starting with oci://), the chart reference
-    is the OCI URL itself, and the actual chart name is extracted from the URL.
-
     Args:
-        chart: Chart name within the repository (repo reference for OCI, chart name for HTTP/HTTPS)
-        repo: Repository URL (HTTP/HTTPS or OCI format)
+        chart: Chart name or OCI URL (e.g., "mychart" or "oci://registry.com/mychart")
         dest: Directory to untar the chart into
+        repo: Optional repository URL (for HTTP/HTTPS repos)
         version: Optional chart version
 
     Returns:
@@ -84,13 +80,9 @@ def pull_chart(
     Raises:
         RuntimeError: If helm pull fails
     """
-    # Determine if this is an OCI registry
-    is_oci = repo.startswith("oci://")
-
-    # For OCI repos, extract the actual chart name from the URL (last component)
-    # For HTTP/HTTPS repos, use the provided chart name
-    if is_oci:
-        actual_chart_name = repo.rstrip("/").split("/")[-1]
+    # Determine actual chart name for the directory
+    if chart.startswith("oci://"):
+        actual_chart_name = chart.rstrip("/").split("/")[-1]
     else:
         actual_chart_name = chart
 
@@ -103,16 +95,13 @@ def pull_chart(
     dest.mkdir(parents=True, exist_ok=True)
 
     version_str = f" (version {version})" if version else ""
-    logger.info(f"Downloading chart {chart} from {repo}{version_str}")
+    source_str = f" from {repo}" if repo else ""
+    logger.info(f"Downloading chart {chart}{source_str}{version_str}")
 
     cmd = ["helm", "pull"]
+    cmd.append(chart)
 
-    if is_oci:
-        # For OCI registries, the repo URL is the full chart reference
-        cmd.append(repo)
-    else:
-        # For HTTP/HTTPS repositories, use --repo flag with chart name
-        cmd.append(chart)
+    if repo:
         cmd.extend(["--repo", repo])
 
     cmd.extend(["--untar", "--untardir", str(dest)])
