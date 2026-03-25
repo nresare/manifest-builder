@@ -25,6 +25,7 @@ class ChartConfig:
     extra_resources: Path | None = (
         None  # directory with additional YAML resources to include
     )
+    init: Path | None = None  # optional shell script to inject as initContainer
 
 
 @dataclass
@@ -177,6 +178,11 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
     if "extra-resources" in data:
         extra_resources = config_dir / data["extra-resources"]
 
+    # Parse init: resolve path relative to the TOML file's directory
+    init = None
+    if "init" in data:
+        init = config_dir / data["init"]
+
     if has_release:
         return ChartConfig(
             name=data["release"],
@@ -187,6 +193,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             values=values,
             release=data["release"],
             extra_resources=extra_resources,
+            init=init,
         )
     else:
         if "name" not in data:
@@ -200,6 +207,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             values=values,
             release=None,
             extra_resources=extra_resources,
+            init=init,
         )
 
 
@@ -357,6 +365,7 @@ def resolve_configs(
                 values=config.values,
                 release=config.release,
                 extra_resources=config.extra_resources,
+                init=config.init,
             )
         )
 
@@ -426,3 +435,6 @@ def validate_config(
             raise ValueError(
                 f"Local chart path not found for '{config.name}': {config.chart}"
             )
+
+    if config.init is not None and not config.init.exists():
+        raise ValueError(f"init script not found for '{config.name}': {config.init}")

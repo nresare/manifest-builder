@@ -549,6 +549,47 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
     assert resolved == [config]
 
 
+def test_resolve_configs_preserves_init_field(tmp_path: Path) -> None:
+    """resolve_configs should preserve the init field when resolving release references."""
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text("#!/bin/sh\necho init")
+
+    config = ChartConfig(
+        name="my-release",
+        namespace="default",
+        chart=None,
+        repo=None,
+        version=None,
+        values=[],
+        release="surrealdb",
+        extra_resources=None,
+        init=script_file,
+    )
+
+    helmfile = Helmfile(
+        repositories=[
+            HelmfileRepository(
+                name="surreal",
+                url="https://surrealdb.com/charts",
+                oci=False,
+            )
+        ],
+        releases=[
+            HelmfileRelease(
+                name="surrealdb",
+                chart="surreal/surrealdb",
+                version="1.0.0",
+                namespace=None,
+            )
+        ],
+    )
+
+    resolved = resolve_configs([config], helmfile)
+    assert len(resolved) == 1
+    assert isinstance(resolved[0], ChartConfig)
+    assert resolved[0].init == script_file
+
+
 def test_load_website_config_with_config(tmp_path: Path) -> None:
     """Website config can specify config with local paths."""
     conf_dir = tmp_path / "conf"
@@ -813,6 +854,51 @@ def test_validate_config_chart_extra_resources_not_a_directory(tmp_path: Path) -
         extra_resources=not_a_dir,
     )
     with pytest.raises(ValueError, match="Extra resources path is not a directory"):
+        validate_config(config, tmp_path)
+
+
+def test_load_chart_config_with_init(tmp_path: Path) -> None:
+    """Chart config can specify an init script to inject as initContainer."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    script_file = conf_dir / "setup.sh"
+    script_file.write_text("#!/bin/sh\necho 'initializing'")
+
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+[[helm]]
+name = "my-chart"
+namespace = "default"
+chart = "./charts/myapp"
+init = "setup.sh"
+""",
+    )
+
+    configs = load_configs(conf_dir)
+    config = configs[0]
+    assert isinstance(config, ChartConfig)
+    assert config.init == script_file
+
+
+def test_validate_config_chart_init_missing_file(tmp_path: Path) -> None:
+    """Validation should fail if init script file doesn't exist."""
+    # Create the chart directory so that check passes
+    chart_dir = tmp_path / "charts" / "myapp"
+    chart_dir.mkdir(parents=True)
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="./charts/myapp",
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=tmp_path / "nonexistent.sh",
+    )
+    with pytest.raises(ValueError, match="init script not found"):
         validate_config(config, tmp_path)
 
 
