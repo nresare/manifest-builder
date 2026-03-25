@@ -76,6 +76,7 @@ def _generate_helm_manifests(
     output_dir: Path,
     charts_dir: Path,
     verbose: bool = False,
+    images: dict[str, str] | None = None,
 ) -> set[Path]:
     """Generate manifests from a Helm chart.
 
@@ -145,6 +146,53 @@ def _generate_helm_manifests(
         namespace=config.namespace,
         values_files=values_paths,
     )
+
+    # Inject init container if configured
+    if config.init:
+        docs = [d for d in yaml.safe_load_all(manifest_content) if d]
+        deployments = [d for d in docs if d.get("kind") == "Deployment"]
+        if len(deployments) != 1:
+            raise ValueError(
+                f"init requires exactly one Deployment in chart '{config.name}', "
+                f"found {len(deployments)}"
+            )
+        alpine_image = (images or {}).get("alpine_image")
+        if not alpine_image:
+            raise ValueError(
+                f"init requires 'alpine_image' to be defined in images.toml "
+                f"for '{config.name}'"
+            )
+        script = config.init.read_text()
+        deployment = deployments[0]
+        pod_spec = (
+            deployment.setdefault("spec", {})
+            .setdefault("template", {})
+            .setdefault("spec", {})
+        )
+        # Collect unique volumeMounts from all containers
+        seen = set()
+        volume_mounts = []
+        for container in pod_spec.get("containers", []):
+            for vm in container.get("volumeMounts", []):
+                key = (vm.get("name"), vm.get("mountPath"))
+                if key not in seen:
+                    seen.add(key)
+                    volume_mounts.append(vm)
+        init_container: dict = {
+            "name": config.init.stem,
+            "image": alpine_image,
+            "command": ["/bin/sh", "-c", script],
+        }
+        if volume_mounts:
+            init_container["volumeMounts"] = volume_mounts
+        pod_spec["initContainers"] = [init_container]
+        # Re-serialize; write_manifests will re-parse
+        import io
+
+        stream = io.StringIO()
+        yaml.dump_all(docs, stream, default_flow_style=False, sort_keys=False)
+        manifest_content = stream.getvalue()
+
     paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
 
     # Handle CRDs from the chart's crds directory (helm template doesn't include these)
@@ -248,7 +296,7 @@ def generate_manifests(
                 paths = generate_simple(config, output_dir, images=images)
             else:
                 paths = _generate_helm_manifests(
-                    config, output_dir, charts_dir, verbose
+                    config, output_dir, charts_dir, verbose, images=images
                 )
 
             # Check for conflicts with the previously written files
