@@ -365,6 +365,7 @@ def resolve_configs(
                 values=config.values,
                 release=config.release,
                 extra_resources=config.extra_resources,
+                init=config.init,
             )
         )
 
