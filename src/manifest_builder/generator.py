@@ -169,7 +169,7 @@ def _generate_helm_manifests(
             .setdefault("template", {})
             .setdefault("spec", {})
         )
-        # Collect unique volumeMounts from all containers
+        # Collect unique volumeMounts from all containers (deep copy to avoid YAML anchors)
         seen = set()
         volume_mounts = []
         for container in pod_spec.get("containers", []):
@@ -177,7 +177,8 @@ def _generate_helm_manifests(
                 key = (vm.get("name"), vm.get("mountPath"))
                 if key not in seen:
                     seen.add(key)
-                    volume_mounts.append(vm)
+                    # Deep copy the volumeMount to avoid YAML anchor/alias reuse
+                    volume_mounts.append({k: v for k, v in vm.items()})
         init_container: dict = {
             "name": config.init.stem,
             "image": alpine_image,
