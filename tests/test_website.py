@@ -1028,3 +1028,75 @@ def test_generate_website_bundled_hugo_uses_images(tmp_path: Path) -> None:
     assert git_container["image"] == "alpine/git:2.47.2"
     hugo_container = next(c for c in init_containers if c["name"] == "hugo")
     assert hugo_container["image"] == "floryn90/hugo:0.155.3-alpine"
+
+
+def test_generate_website_default_replicas(tmp_path: Path) -> None:
+    """Website without replicas specified should default to 2 replicas."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  replicas: {{replicas}}\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production")
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
+
+    (path,) = paths
+    doc = yaml.safe_load(path.read_text())
+    assert doc["spec"]["replicas"] == 2
+
+
+def test_generate_website_custom_replicas(tmp_path: Path) -> None:
+    """Website with custom replicas should use the specified value."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  replicas: {{replicas}}\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production", replicas=5)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
+
+    (path,) = paths
+    doc = yaml.safe_load(path.read_text())
+    assert doc["spec"]["replicas"] == 5
+
+
+def test_generate_website_single_replica(tmp_path: Path) -> None:
+    """Website with replicas=1 should use 1 replica."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  replicas: {{replicas}}\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production", replicas=1)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
+
+    (path,) = paths
+    doc = yaml.safe_load(path.read_text())
+    assert doc["spec"]["replicas"] == 1
+
+
+def test_generate_website_zero_replicas(tmp_path: Path) -> None:
+    """Website with replicas=0 should use 0 replicas."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  replicas: {{replicas}}\n"
+    )
+
+    config = WebsiteConfig(name="my-website", namespace="production", replicas=0)
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
+
+    (path,) = paths
+    doc = yaml.safe_load(path.read_text())
+    assert doc["spec"]["replicas"] == 0

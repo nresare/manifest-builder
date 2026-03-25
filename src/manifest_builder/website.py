@@ -129,6 +129,7 @@ def generate_website(
     context: dict[str, Any] = {
         "name": config.name,
         "k8s_name": _make_k8s_name(config.name),
+        "replicas": config.replicas,
     }
     if images:
         context.update(images)
