@@ -545,3 +545,349 @@ spec:
     assert root_crd_output.exists()
     assert sub_crd_output.exists()
     assert len(paths) == 2
+
+
+def test_generate_helm_manifests_init_single_deployment(tmp_path: Path) -> None:
+    """init script should be injected as initContainer when exactly one Deployment exists."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text("mkdir -p /data && chown 65532:65532 /data")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=script_file,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    deployment_yaml = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+"""
+
+    images = {"alpine_image": "alpine:3.21"}
+
+    with (
+        mock.patch(
+            "manifest_builder.generator.pull_chart",
+            return_value=chart_dir,
+        ),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template",
+            return_value=deployment_yaml,
+        ),
+    ):
+        paths = _generate_helm_manifests(config, output_dir, charts_dir, images=images)
+
+    assert len(paths) == 1
+    deployment_file = output_dir / "default" / "deployment-my-app.yaml"
+    assert deployment_file.exists()
+
+    doc = yaml.safe_load(deployment_file.read_text())
+    assert "initContainers" in doc["spec"]["template"]["spec"]
+    init_containers = doc["spec"]["template"]["spec"]["initContainers"]
+    assert len(init_containers) == 1
+    assert init_containers[0]["name"] == "setup"
+    assert init_containers[0]["image"] == "alpine:3.21"
+    assert init_containers[0]["command"] == [
+        "/bin/sh",
+        "-c",
+        "mkdir -p /data && chown 65532:65532 /data",
+    ]
+    assert len(init_containers[0]["volumeMounts"]) == 1
+    assert init_containers[0]["volumeMounts"][0]["name"] == "data"
+
+
+def test_generate_helm_manifests_init_multiple_deployments(tmp_path: Path) -> None:
+    """init should fail with ValueError if more than one Deployment exists."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text("echo 'init'")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=script_file,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    two_deployments = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app1
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+"""
+
+    images = {"alpine_image": "alpine:3.21"}
+
+    with (
+        mock.patch(
+            "manifest_builder.generator.pull_chart",
+            return_value=chart_dir,
+        ),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template",
+            return_value=two_deployments,
+        ),
+    ):
+        with pytest.raises(
+            ValueError, match="init requires exactly one Deployment.*found 2"
+        ):
+            _generate_helm_manifests(config, output_dir, charts_dir, images=images)
+
+
+def test_generate_helm_manifests_init_no_deployments(tmp_path: Path) -> None:
+    """init should fail with ValueError if no Deployments exist."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text("echo 'init'")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=script_file,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    service_yaml = """\
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: myapp
+"""
+
+    images = {"alpine_image": "alpine:3.21"}
+
+    with (
+        mock.patch(
+            "manifest_builder.generator.pull_chart",
+            return_value=chart_dir,
+        ),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template",
+            return_value=service_yaml,
+        ),
+    ):
+        with pytest.raises(
+            ValueError, match="init requires exactly one Deployment.*found 0"
+        ):
+            _generate_helm_manifests(config, output_dir, charts_dir, images=images)
+
+
+def test_generate_helm_manifests_init_missing_alpine_image(tmp_path: Path) -> None:
+    """init should fail if alpine_image is not in images dict."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text("echo 'init'")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=script_file,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    deployment_yaml = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+"""
+
+    images = {}  # missing alpine_image
+
+    with (
+        mock.patch(
+            "manifest_builder.generator.pull_chart",
+            return_value=chart_dir,
+        ),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template",
+            return_value=deployment_yaml,
+        ),
+    ):
+        with pytest.raises(
+            ValueError,
+            match="init requires 'alpine_image' to be defined in images.toml",
+        ):
+            _generate_helm_manifests(config, output_dir, charts_dir, images=images)
+
+
+def test_generate_helm_manifests_init_no_volumemounts(tmp_path: Path) -> None:
+    """init container should have no volumeMounts if containers have none."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text("echo 'init'")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=script_file,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    deployment_yaml = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+"""
+
+    images = {"alpine_image": "alpine:3.21"}
+
+    with (
+        mock.patch(
+            "manifest_builder.generator.pull_chart",
+            return_value=chart_dir,
+        ),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template",
+            return_value=deployment_yaml,
+        ),
+    ):
+        _generate_helm_manifests(config, output_dir, charts_dir, images=images)
+
+    deployment_file = output_dir / "default" / "deployment-my-app.yaml"
+    doc = yaml.safe_load(deployment_file.read_text())
+    init_containers = doc["spec"]["template"]["spec"]["initContainers"]
+    assert "volumeMounts" not in init_containers[0]
+
+
+def test_generate_helm_manifests_no_init(tmp_path: Path) -> None:
+    """Without init configured, Deployment should not have initContainers."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        init=None,  # no init script
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    deployment_yaml = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+"""
+
+    with (
+        mock.patch(
+            "manifest_builder.generator.pull_chart",
+            return_value=chart_dir,
+        ),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template",
+            return_value=deployment_yaml,
+        ),
+    ):
+        _generate_helm_manifests(config, output_dir, charts_dir)
+
+    deployment_file = output_dir / "default" / "deployment-my-app.yaml"
+    doc = yaml.safe_load(deployment_file.read_text())
+    assert "initContainers" not in doc["spec"]["template"]["spec"]
