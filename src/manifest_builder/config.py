@@ -8,6 +8,8 @@ from pathlib import Path
 
 from manifest_builder.helmfile import Helmfile
 
+DEFAULT_REPLICA_COUNT = 2
+
 
 @dataclass
 class ChartConfig:
@@ -41,6 +43,7 @@ class WebsiteConfig:
     external_secrets: list[str] | None = (
         None  # mount paths for external secrets (e.g., ["/email-password"])
     )
+    replicas: int = DEFAULT_REPLICA_COUNT  # number of deployment replicas
 
 
 @dataclass
@@ -237,6 +240,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         config=config_dict,
         extra_hostnames=data.get("extra-hostnames"),
         external_secrets=external_secrets,
+        replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
     )
 
 

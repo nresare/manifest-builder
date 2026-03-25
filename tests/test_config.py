@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from manifest_builder.config import (
+    DEFAULT_REPLICA_COUNT,
     ChartConfig,
     SimpleConfig,
     WebsiteConfig,
@@ -692,6 +693,65 @@ external-secrets = "/api-key"
     config = configs[0]
     assert isinstance(config, WebsiteConfig)
     assert config.external_secrets == ["/api-key"]
+
+
+def test_load_website_config_with_replicas(tmp_path: Path) -> None:
+    """Website config can specify replicas for the Deployment."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+replicas = 5
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.replicas == 5
+
+
+def test_load_website_config_replicas_single(tmp_path: Path) -> None:
+    """Website config can specify replicas=1."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+replicas = 1
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.replicas == 1
+
+
+def test_load_website_config_replicas_not_specified(tmp_path: Path) -> None:
+    """Website config without replicas should default to DEFAULT_REPLICA_COUNT."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.replicas == DEFAULT_REPLICA_COUNT
 
 
 def test_load_chart_config_with_extra_resources(tmp_path: Path) -> None:
