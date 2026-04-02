@@ -73,6 +73,8 @@ def load_images(config_dir: Path) -> dict[str, str]:
     Returns a dict mapping template variable names to image references, e.g.:
         {"git_image": "alpine/git:2.47.2", "hugo_image": "floryn90/hugo:0.155.3-alpine"}
 
+    If images.toml is absent, returns an empty dict so image overrides remain optional.
+
     Args:
         config_dir: Directory containing images.toml
 
@@ -80,12 +82,11 @@ def load_images(config_dir: Path) -> dict[str, str]:
         Dict mapping image variable names to full image references (repo:version)
 
     Raises:
-        FileNotFoundError: If images.toml is not found in config_dir
         ValueError: If images.toml is invalid or missing required fields
     """
     images_file = config_dir / "images.toml"
     if not images_file.exists():
-        raise FileNotFoundError(f"images.toml not found in {config_dir}")
+        return {}
 
     data = tomllib.loads(images_file.read_text())
 
