@@ -3,12 +3,13 @@
 """Configuration parsing and validation for manifest-builder."""
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from manifest_builder.helmfile import Helmfile
 
 DEFAULT_REPLICA_COUNT = 2
+TemplateValue = str | int | float | bool
 
 
 @dataclass
@@ -22,6 +23,7 @@ class ChartConfig:
     version: str | None
     values: list[Path]
     release: str | None  # helmfile release name; None for direct chart entries
+    variables: dict[str, TemplateValue] = field(default_factory=dict)
     extra_resources: Path | None = (
         None  # directory with additional YAML resources to include
     )
@@ -114,7 +116,8 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
     """
     Load all app configurations from TOML files in the config directory.
 
-    Each TOML file may contain [[helm]], [[website]], and [[simple]] tables.
+    Each TOML file may contain a [variables] table and [[helm]], [[website]],
+    and [[simple]] tables.
 
     Args:
         config_dir: Directory containing TOML configuration files
@@ -147,8 +150,10 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
                 f"No [[helm]], [[website]], or [[simple]] entries found in {toml_file}"
             )
 
+        variables = _parse_variables(data.get("variables"), toml_file)
+
         for helm_data in data.get("helm", []):
-            configs.append(_parse_chart_config(helm_data, toml_file))
+            configs.append(_parse_chart_config(helm_data, toml_file, variables))
 
         for website_data in data.get("website", []):
             configs.append(_parse_website_config(website_data, toml_file))
@@ -159,7 +164,9 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
     return configs
 
 
-def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
+def _parse_chart_config(
+    data: dict, source_file: Path, variables: dict[str, TemplateValue]
+) -> ChartConfig:
     """Parse a single Helm chart configuration from TOML data."""
     has_release = "release" in data
     has_chart = "chart" in data
@@ -192,6 +199,7 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             repo=None,
             version=None,
             values=values,
+            variables=variables.copy(),
             release=data["release"],
             extra_resources=extra_resources,
             init=init,
@@ -206,17 +214,41 @@ def _parse_chart_config(data: dict, source_file: Path) -> ChartConfig:
             repo=data.get("repo"),
             version=data.get("version"),
             values=values,
+            variables=variables.copy(),
             release=None,
             extra_resources=extra_resources,
             init=init,
         )
 
 
+def _parse_variables(
+    data: dict[str, object] | None, source_file: Path
+) -> dict[str, TemplateValue]:
+    """Parse top-level variables for values file templating."""
+    if data is None:
+        return {}
+
+    if not isinstance(data, dict):
+        raise ValueError(f"'variables' must be a table in {source_file}")
+
+    variables: dict[str, TemplateValue] = {}
+    for key, value in data.items():
+        if not isinstance(value, str | int | float | bool):
+            raise ValueError(
+                f"Variable '{key}' in {source_file} must be a string, number, or boolean"
+            )
+        variables[key] = value
+
+    return variables
+
+
 def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
     """Parse a website app configuration from TOML data."""
-    for field in ("name", "namespace"):
-        if field not in data:
-            raise ValueError(f"Missing required field '{field}' in {source_file}")
+    for required_field in ("name", "namespace"):
+        if required_field not in data:
+            raise ValueError(
+                f"Missing required field '{required_field}' in {source_file}"
+            )
 
     hugo_repo = data.get("hugo-repo")
     image = data.get("image")
@@ -255,9 +287,11 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
 
 def _parse_simple_config(data: dict, source_file: Path) -> SimpleConfig:
     """Parse a simple app configuration from TOML data."""
-    for field in ("namespace", "copy-from"):
-        if field not in data:
-            raise ValueError(f"Missing required field '{field}' in {source_file}")
+    for required_field in ("namespace", "copy-from"):
+        if required_field not in data:
+            raise ValueError(
+                f"Missing required field '{required_field}' in {source_file}"
+            )
 
     config_dir = source_file.parent
     name = data.get("name", data["namespace"])
@@ -364,6 +398,7 @@ def resolve_configs(
                 repo=resolved_repo,
                 version=hf_release.version,
                 values=config.values,
+                variables=config.variables,
                 release=config.release,
                 extra_resources=config.extra_resources,
                 init=config.init,
