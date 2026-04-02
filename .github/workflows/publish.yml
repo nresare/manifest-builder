@@ -38,7 +38,7 @@ jobs:
         run: uvx simple503 -s -B /manifest-builder dist simple
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: simple
 
