@@ -29,7 +29,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Download wheel artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
