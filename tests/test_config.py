@@ -104,6 +104,38 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
     assert config.values == []
 
 
+def test_variables_are_loaded_for_helm_configs(tmp_path: Path) -> None:
+    """Top-level variables should be attached to helm configs from the same TOML file."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [variables]
+        domain = "example.com"
+        replica_count = 3
+        use_tls = true
+
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        values = ["values.yaml"]
+        """,
+    )
+
+    configs = load_configs(conf_dir)
+    assert len(configs) == 1
+    config = configs[0]
+    assert isinstance(config, ChartConfig)
+    assert config.variables == {
+        "domain": "example.com",
+        "replica_count": 3,
+        "use_tls": True,
+    }
+
+
 # ---------------------------------------------------------------------------
 # validate_config
 # ---------------------------------------------------------------------------

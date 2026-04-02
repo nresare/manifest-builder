@@ -3,13 +3,17 @@
 """Manifest generation orchestration."""
 
 import logging
+import tempfile
 from pathlib import Path
 
+import pystache
 import yaml
+from pystache.common import MissingTags
 
 from manifest_builder.config import (
     ChartConfig,
     SimpleConfig,
+    TemplateValue,
     WebsiteConfig,
     validate_config,
 )
@@ -104,8 +108,6 @@ def _generate_helm_manifests(
             "ensure resolve_configs() was called before generate_manifests()"
         )
 
-    values_paths = config.values
-
     # Pull the chart from the repo if configured (traditional or OCI)
     if config.repo or (config.chart and config.chart.startswith("oci://")):
         version_suffix = f"-{config.version}" if config.version else ""
@@ -140,12 +142,20 @@ def _generate_helm_manifests(
     else:
         chart_path = config.chart
 
-    manifest_content = run_helm_template(
-        release_name=config.name,
-        chart=chart_path,
-        namespace=config.namespace,
-        values_files=values_paths,
-    )
+    values_context: dict[str, TemplateValue | str] = {
+        **(images or {}),
+        **config.variables,
+    }
+    with tempfile.TemporaryDirectory(prefix="manifest-builder-values-") as temp_dir:
+        values_paths = _render_values_files(
+            config.values, Path(temp_dir), values_context
+        )
+        manifest_content = run_helm_template(
+            release_name=config.name,
+            chart=chart_path,
+            namespace=config.namespace,
+            values_files=values_paths,
+        )
 
     # Inject init container if configured
     if config.init:
@@ -234,6 +244,25 @@ def _generate_helm_manifests(
             logger.debug(f"Copied {len(extra_docs)} extra resources")
 
     return paths
+
+
+def _render_values_files(
+    values_paths: list[Path],
+    temp_dir: Path,
+    context: dict[str, TemplateValue | str],
+) -> list[Path]:
+    """Render values files as Mustache templates into temporary files."""
+    if not values_paths:
+        return []
+
+    renderer = pystache.Renderer(missing_tags=MissingTags.strict)
+    rendered_paths: list[Path] = []
+    for index, values_path in enumerate(values_paths):
+        rendered_path = temp_dir / f"{index:02d}-{values_path.name}"
+        rendered_path.write_text(renderer.render(values_path.read_text(), context))
+        rendered_paths.append(rendered_path)
+
+    return rendered_paths
 
 
 def generate_manifests(

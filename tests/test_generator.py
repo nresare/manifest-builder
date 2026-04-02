@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-
 import yaml
+from pystache.context import KeyNotFoundError
 
 from manifest_builder.config import ChartConfig
 from manifest_builder.generator import (
@@ -891,3 +891,74 @@ spec:
     deployment_file = output_dir / "default" / "deployment-my-app.yaml"
     doc = yaml.safe_load(deployment_file.read_text())
     assert "initContainers" not in doc["spec"]["template"]["spec"]
+
+
+def test_generate_helm_manifests_renders_values_files_with_variables(
+    tmp_path: Path,
+) -> None:
+    """Helm values files should be rendered with config variables before templating."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    values_file = tmp_path / "values.yaml"
+    values_file.write_text("hostname: {{domain}}\nreplicas: {{replicas}}\n")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[values_file],
+        variables={"domain": "example.com", "replicas": 2},
+        release=None,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+    captured_values: dict[str, str] = {}
+
+    def fake_run_helm_template(
+        release_name: str,
+        chart: str,
+        namespace: str,
+        values_files: list[Path],
+        version: str | None = None,
+    ) -> str:
+        del release_name, chart, namespace, version
+        captured_values["content"] = values_files[0].read_text()
+        return ""
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template",
+        side_effect=fake_run_helm_template,
+    ):
+        paths = _generate_helm_manifests(config, output_dir, charts_dir)
+
+    assert paths == set()
+    assert captured_values["content"] == "hostname: example.com\nreplicas: 2\n"
+
+
+def test_generate_helm_manifests_raises_on_missing_variable_in_values_file(
+    tmp_path: Path,
+) -> None:
+    """Rendering values files should fail when a referenced variable is missing."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    values_file = tmp_path / "values.yaml"
+    values_file.write_text("hostname: {{domain}}\n")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[values_file],
+        release=None,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    with pytest.raises(KeyNotFoundError):
+        _generate_helm_manifests(config, output_dir, charts_dir)
