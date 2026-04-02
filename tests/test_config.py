@@ -1102,13 +1102,12 @@ def test_load_images_returns_image_dict(tmp_path: Path) -> None:
     }
 
 
-def test_load_images_raises_when_missing(tmp_path: Path) -> None:
-    """load_images should raise FileNotFoundError when images.toml is missing."""
+def test_load_images_returns_empty_dict_when_missing(tmp_path: Path) -> None:
+    """load_images should return an empty dict when images.toml is missing."""
     conf_dir = tmp_path / "conf"
     conf_dir.mkdir()
 
-    with pytest.raises(FileNotFoundError, match="images.toml not found"):
-        load_images(conf_dir)
+    assert load_images(conf_dir) == {}
 
 
 def test_load_images_converts_hyphens_to_underscores(tmp_path: Path) -> None:
