@@ -962,3 +962,44 @@ def test_generate_helm_manifests_raises_on_missing_variable_in_values_file(
 
     with pytest.raises(KeyNotFoundError):
         _generate_helm_manifests(config, output_dir, charts_dir)
+
+
+def test_generate_helm_manifests_renders_extra_resources_with_variables(
+    tmp_path: Path,
+) -> None:
+    """Extra resource manifests should be rendered with config variables before parsing."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    extra_dir = tmp_path / "extra"
+    extra_dir.mkdir()
+    (extra_dir / "configmap.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: my-config\n"
+        "data:\n  domain: {{domain}}\n"
+    )
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        variables={"domain": "example.com"},
+        release=None,
+        extra_resources=extra_dir,
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template",
+        return_value="",
+    ):
+        _generate_helm_manifests(config, output_dir, charts_dir)
+
+    written = list(output_dir.rglob("*.yaml"))
+    assert len(written) == 1
+    content = written[0].read_text()
+    assert "example.com" in content
+    assert "{{domain}}" not in content

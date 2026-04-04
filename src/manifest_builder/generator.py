@@ -224,9 +224,11 @@ def _generate_helm_manifests(
 
     # Handle extra resources if configured
     if config.extra_resources:
+        renderer = pystache.Renderer(missing_tags=MissingTags.strict)
         extra_docs: list[dict] = []
         for yaml_file in sorted(config.extra_resources.glob("*.yaml")):
-            for doc in yaml.safe_load_all(yaml_file.read_text()):
+            rendered = renderer.render(yaml_file.read_text(), values_context)
+            for doc in yaml.safe_load_all(rendered):
                 if doc:
                     # Add namespace to namespaced resources without one
                     kind = doc.get("kind")
