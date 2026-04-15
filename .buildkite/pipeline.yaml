@@ -1,0 +1,20 @@
+steps:
+  - label: ":test_tube: Test and Build"
+    key: test-and-build
+    command: |
+      uv sync
+      uv run ruff check
+      uv run ruff format --check
+      uv run ty check
+      uv run pytest
+      uv build --wheel
+    artifact_paths:
+      - "dist/*.whl"
+  - label: Publish
+    depends_on: test-and-build
+    branches: main
+    plugins:
+      - publish-to-packages#v2.2.0:
+          artifacts: "dist/*.whl"
+          registry: "nresare/python"
+
