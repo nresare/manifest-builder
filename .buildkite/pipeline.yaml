@@ -2,12 +2,12 @@ steps:
   - label: ":test_tube: Test and Build"
     key: test-and-build
     command: |
-      uv sync
       uv run ruff check
       uv run ruff format --check
-      uv run ty check
       uv run pytest
+      # the wheel build needs to happen before the ty check on havtorn for some reason, to generate _version
       uv build --wheel
+      uv run ty check
     artifact_paths:
       - "dist/*.whl"
   - label: Publish
