@@ -9,6 +9,33 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _remove_namespace_only_directories(output_dir: Path) -> None:
+    """Remove namespace directories that only contain their auto-generated Namespace.
+
+    This cleanup is intentionally limited to commit creation, where we can safely
+    prune directories that no longer contain any workload manifests but still have
+    a checked-in auto-generated ``namespace-<namespace>.yaml``.
+    """
+    if not output_dir.exists():
+        return
+
+    for namespace_dir in sorted(output_dir.iterdir()):
+        if (
+            not namespace_dir.is_dir()
+            or namespace_dir.name == "cluster"
+            or namespace_dir.name == "kube-system"
+        ):
+            continue
+
+        files = sorted(path for path in namespace_dir.iterdir() if path.is_file())
+        expected_namespace_file = namespace_dir / f"namespace-{namespace_dir.name}.yaml"
+
+        if files == [expected_namespace_file]:
+            expected_namespace_file.unlink()
+            namespace_dir.rmdir()
+            logger.debug("Removed namespace-only directory %s", namespace_dir.name)
+
+
 def get_git_commit(path: Path) -> str:
     """
     Get the current git commit hash of a directory.
@@ -87,6 +114,8 @@ def create_manifest_commit(
         old_yaml_files = all_yaml_files - generated_files
         for old_file in old_yaml_files:
             old_file.unlink()
+
+        _remove_namespace_only_directories(output_dir)
 
         # Stage all changes (added, modified, deleted)
         subprocess.run(
