@@ -102,6 +102,13 @@ def main(
         # Load container image definitions
         images = load_images(config_dir)
 
+        # Fail fast before the time-consuming generation step
+        if create_commit and is_git_dirty(config_dir) and not allow_dirty_config:
+            raise ValueError(
+                "Config directory has local changes. Use --allow-dirty-config "
+                "to allow commit creation with uncommitted changes."
+            )
+
         # Generate manifests
         written_paths = generate_manifests(
             configs=configs,
@@ -113,12 +120,6 @@ def main(
 
         # Create commit if requested
         if create_commit:
-            if is_git_dirty(config_dir) and not allow_dirty_config:
-                raise ValueError(
-                    "Config directory has local changes. Use --allow-dirty-config "
-                    "to allow commit creation with uncommitted changes."
-                )
-
             config_commit = get_git_commit(config_dir)
             create_manifest_commit(
                 output_dir, __version__, config_commit, written_paths
