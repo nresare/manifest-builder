@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from manifest_builder.config import WebsiteConfig
-from manifest_builder.generator import generate_manifests
+from manifest_builder.generator import ManifestError, generate_manifests
 from manifest_builder.website import generate_website
 
 SIMPLE_DEPLOYMENT = """\
@@ -226,7 +226,7 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
             },  # config2 also generates this
         ],
     ):
-        with pytest.raises(ValueError, match="Configuration conflict"):
+        with pytest.raises(ManifestError, match="Configuration conflict"):
             generate_manifests([config1, config2], output_dir, repo_root=tmp_path)
 
 

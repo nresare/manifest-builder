@@ -22,6 +22,14 @@ from manifest_builder.helm import pull_chart, run_helm_template
 logger = logging.getLogger(__name__)
 
 
+class ManifestError(Exception):
+    """Raised when manifest generation fails for a specific config."""
+
+    def __init__(self, config_name: str, cause: Exception) -> None:
+        self.config_name = config_name
+        super().__init__(str(cause))
+
+
 def setup_logging(verbose: bool = False) -> None:
     """Configure logging with a formatter for console output.
 
@@ -348,9 +356,11 @@ def generate_manifests(
 
             logger.info(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
 
-        except Exception:
-            logger.error(f"✗ {config.name} ({config.namespace})")
+        except ManifestError:
             raise
+        except Exception as e:
+            logger.error(f"✗ {config.name} ({config.namespace})")
+            raise ManifestError(config.name, e) from e
 
     # Create Namespace objects for any namespace that lacks one
     namespace_paths = _ensure_namespaces(output_dir, written_paths)
@@ -518,7 +528,7 @@ def _make_k8s_name(name: str) -> str:
 
 def _strip_helm_from_metadata(metadata: dict) -> None:
     for key in ("labels", "annotations"):
-        if key in metadata:
+        if key in metadata and metadata[key] is not None:
             metadata[key] = {
                 k: v
                 for k, v in metadata[key].items()
@@ -546,9 +556,14 @@ def _write_documents(
 ) -> set[Path]:
     written: set[Path] = set()
     for doc in documents:
-        strip_helm_metadata(doc)
-        kind = doc.get("kind")
-        name = doc.get("metadata", {}).get("name")
+        kind = doc.get("kind", "unknown")
+        name = (doc.get("metadata") or {}).get("name", "unknown")
+        try:
+            strip_helm_metadata(doc)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to strip helm metadata from {kind}/{name}: {e}"
+            ) from e
 
         if not kind or not name:
             continue
