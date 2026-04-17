@@ -154,6 +154,14 @@ def test_strip_helm_metadata_preserves_non_helm_managed_by() -> None:
     }
 
 
+def test_strip_helm_metadata_handles_null_labels() -> None:
+    """strip_helm_metadata should not crash when labels or annotations is null in the YAML."""
+    doc = {"metadata": {"labels": None, "annotations": None}}
+    strip_helm_metadata(doc)
+    assert doc["metadata"]["labels"] is None
+    assert doc["metadata"]["annotations"] is None
+
+
 def test_write_manifests_returns_paths_for_stale_file_removal(tmp_path: Path) -> None:
     stale = tmp_path / "default" / "configmap-old.yaml"
     stale.parent.mkdir(parents=True)

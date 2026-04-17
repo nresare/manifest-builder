@@ -9,7 +9,7 @@ import click
 
 from manifest_builder._version import __version__
 from manifest_builder.config import load_configs, load_images, resolve_configs
-from manifest_builder.generator import generate_manifests, setup_logging
+from manifest_builder.generator import ManifestError, generate_manifests, setup_logging
 from manifest_builder.git_utils import (
     create_manifest_commit,
     get_git_commit,
@@ -125,6 +125,9 @@ def main(
             )
             click.echo(f"✓ Created commit in {output_dir}")
 
+    except ManifestError as e:
+        click.echo(f"Error processing {e.config_name}: {e}", err=True)
+        sys.exit(1)
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
