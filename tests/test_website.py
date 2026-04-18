@@ -999,7 +999,7 @@ def test_generate_website_custom_token_audience_injects_projected_token(
     assert volumes["tokens"]["projected"]["sources"] == [
         {
             "serviceAccountToken": {
-                "path": "custom-token",
+                "path": "vault",
                 "expirationSeconds": 3600,
                 "audience": "vault",
             }
