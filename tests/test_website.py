@@ -968,6 +968,64 @@ def test_generate_website_no_external_secrets(tmp_path: Path) -> None:
     assert len(secret_volumes) == 0
 
 
+def test_generate_website_custom_token_audience_injects_projected_token(
+    tmp_path: Path,
+) -> None:
+    """Custom token audience should inject a projected service account token."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        custom_token_audience="vault",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+
+    mounts = container.get("volumeMounts", [])
+    assert any(
+        m["name"] == "tokens"
+        and m["mountPath"] == "/var/run/secrets/tokens"
+        and m["readOnly"] is True
+        for m in mounts
+    )
+
+    volumes = {v["name"]: v for v in pod_spec.get("volumes", [])}
+    assert "tokens" in volumes
+    assert volumes["tokens"]["projected"]["sources"] == [
+        {
+            "serviceAccountToken": {
+                "path": "custom-token",
+                "expirationSeconds": 3600,
+                "audience": "vault",
+            }
+        }
+    ]
+
+
+def test_generate_website_without_custom_token_audience_has_no_token_volume(
+    tmp_path: Path,
+) -> None:
+    """Deployment without custom token audience should not inject a token volume."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    volumes = {v["name"]: v for v in pod_spec.get("volumes", [])}
+    assert "tokens" not in volumes
+
+
 def test_generate_website_images_available_in_template(tmp_path: Path) -> None:
     """Images dict should be available in template context."""
     templates_dir = tmp_path / "templates"
