@@ -727,6 +727,26 @@ external-secrets = "/api-key"
     assert config.external_secrets == ["/api-key"]
 
 
+def test_load_website_config_with_custom_token_audience(tmp_path: Path) -> None:
+    """Website config can specify a custom audience for a projected token."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+custom-token-audience = "vault"
+""",
+    )
+
+    configs = load_configs(tmp_path)
+    config = configs[0]
+    assert isinstance(config, WebsiteConfig)
+    assert config.custom_token_audience == "vault"
+
+
 def test_load_website_config_with_replicas(tmp_path: Path) -> None:
     """Website config can specify replicas for the Deployment."""
     write_toml(

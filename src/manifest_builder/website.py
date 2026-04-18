@@ -94,6 +94,42 @@ def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]
     ]
 
 
+def _inject_custom_token_projection(doc: dict, audience: str) -> None:
+    """Inject a projected service account token volume into a Deployment."""
+    if doc.get("kind") != "Deployment":
+        return
+
+    pod_spec = (
+        doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    )
+
+    for container in pod_spec.get("containers", []):
+        container.setdefault("volumeMounts", []).append(
+            {
+                "name": "tokens",
+                "mountPath": "/var/run/secrets/tokens",
+                "readOnly": True,
+            }
+        )
+
+    pod_spec.setdefault("volumes", []).append(
+        {
+            "name": "tokens",
+            "projected": {
+                "sources": [
+                    {
+                        "serviceAccountToken": {
+                            "path": "custom-token",
+                            "expirationSeconds": 3600,
+                            "audience": audience,
+                        }
+                    }
+                ]
+            },
+        }
+    )
+
+
 def generate_website(
     config: WebsiteConfig,
     output_dir: Path,
@@ -263,5 +299,9 @@ def generate_website(
                     pod_spec.setdefault("volumes", []).append(
                         {"name": secret_name, "secret": {"secretName": secret_name}}
                     )
+
+    if config.custom_token_audience:
+        for doc in docs:
+            _inject_custom_token_projection(doc, config.custom_token_audience)
 
     return _write_documents(docs, output_dir, config.namespace, config.name)
