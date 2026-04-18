@@ -119,7 +119,7 @@ def _inject_custom_token_projection(doc: dict, audience: str) -> None:
                 "sources": [
                     {
                         "serviceAccountToken": {
-                            "path": "custom-token",
+                            "path": audience,
                             "expirationSeconds": 3600,
                             "audience": audience,
                         }
