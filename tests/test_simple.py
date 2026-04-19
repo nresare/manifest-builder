@@ -190,6 +190,131 @@ def test_generate_simple_configmap_key_is_filename(tmp_path: Path) -> None:
     assert "config.cfg" in cm["data"]
 
 
+def test_generate_simple_injects_config_volume_and_mount(tmp_path: Path) -> None:
+    """Deployment containers should mount generated ConfigMaps."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "deployment.yaml").write_text(
+        """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acme-dns
+spec:
+  template:
+    spec:
+      containers:
+      - name: acme-dns
+        image: example.com/acme-dns:1.0
+"""
+    )
+    cfg_file = tmp_path / "app.cfg"
+    cfg_file.write_text("[dns]\nport = 53\n")
+
+    output_dir = tmp_path / "output"
+    config = _make_config(
+        tmp_path,
+        manifests_dir,
+        config={"/config/app.cfg": cfg_file},
+    )
+    generate_simple(config, output_dir)
+
+    deployment = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
+    pod_spec = deployment["spec"]["template"]["spec"]
+
+    assert any(
+        volume["name"] == "acme-dns-config"
+        and volume["configMap"]["name"] == "acme-dns-config"
+        for volume in pod_spec["volumes"]
+    )
+    assert any(
+        mount["name"] == "acme-dns-config" and mount["mountPath"] == "/config"
+        for mount in pod_spec["containers"][0]["volumeMounts"]
+    )
+
+
+def test_generate_simple_adds_config_checksum_annotation(tmp_path: Path) -> None:
+    """Deployment pod template should include a config checksum annotation."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "deployment.yaml").write_text(
+        """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acme-dns
+spec:
+  template:
+    metadata:
+      labels:
+        app: acme-dns
+    spec:
+      containers:
+      - name: acme-dns
+        image: example.com/acme-dns:1.0
+"""
+    )
+    cfg_file = tmp_path / "app.cfg"
+    cfg_file.write_text("[dns]\nport = 53\n")
+
+    output_dir = tmp_path / "output"
+    config = _make_config(
+        tmp_path,
+        manifests_dir,
+        config={"/config/app.cfg": cfg_file},
+    )
+    generate_simple(config, output_dir)
+
+    deployment = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
+    annotations = deployment["spec"]["template"]["metadata"]["annotations"]
+    assert "checksum/config" in annotations
+    assert isinstance(annotations["checksum/config"], str)
+    assert len(annotations["checksum/config"]) == 64
+
+
+def test_generate_simple_config_checksum_changes_with_content(tmp_path: Path) -> None:
+    """Changing config content should produce a different checksum annotation."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "deployment.yaml").write_text(
+        """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acme-dns
+spec:
+  template:
+    spec:
+      containers:
+      - name: acme-dns
+        image: example.com/acme-dns:1.0
+"""
+    )
+    cfg_file = tmp_path / "app.cfg"
+    cfg_file.write_text("[dns]\nport = 53\n")
+
+    output_dir = tmp_path / "output"
+    config = _make_config(
+        tmp_path,
+        manifests_dir,
+        config={"/config/app.cfg": cfg_file},
+    )
+    generate_simple(config, output_dir)
+    first = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
+    first_checksum = first["spec"]["template"]["metadata"]["annotations"][
+        "checksum/config"
+    ]
+
+    cfg_file.write_text("[dns]\nport = 54\n")
+    generate_simple(config, output_dir)
+    second = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
+    second_checksum = second["spec"]["template"]["metadata"]["annotations"][
+        "checksum/config"
+    ]
+
+    assert first_checksum != second_checksum
+
+
 def test_generate_simple_no_config_no_configmap(tmp_path: Path) -> None:
     """When no config is specified, no ConfigMap is created."""
     manifests_dir = tmp_path / "manifests"
