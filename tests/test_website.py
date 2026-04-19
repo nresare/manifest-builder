@@ -723,6 +723,80 @@ def test_generate_website_injects_volume_and_mount(tmp_path: Path) -> None:
     )
 
 
+def test_generate_website_adds_config_checksum_annotation(tmp_path: Path) -> None:
+    """Deployment pod template should include a config checksum annotation."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config_file = tmp_path / "app.toml"
+    config_file.write_text("[app]\ndebug = true\n")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config={"/config/app.toml": config_file},
+    )
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    annotations = deployment_doc["spec"]["template"]["metadata"]["annotations"]
+    assert "checksum/config" in annotations
+    assert isinstance(annotations["checksum/config"], str)
+    assert len(annotations["checksum/config"]) == 64
+
+
+def test_generate_website_config_checksum_changes_with_content(tmp_path: Path) -> None:
+    """Changing config content should produce a different checksum annotation."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config_file = tmp_path / "app.toml"
+    config_file.write_text("[app]\ndebug = true\n")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config={"/config/app.toml": config_file},
+    )
+    output_dir = tmp_path / "output"
+    first_paths = generate_website(
+        config, output_dir, _templates_override=templates_dir
+    )
+    first_deployment = yaml.safe_load(
+        next(p for p in first_paths if "deployment" in p.name).read_text()
+    )
+    first_checksum = first_deployment["spec"]["template"]["metadata"]["annotations"][
+        "checksum/config"
+    ]
+
+    config_file.write_text("[app]\ndebug = false\n")
+    second_paths = generate_website(
+        config, output_dir, _templates_override=templates_dir
+    )
+    second_deployment = yaml.safe_load(
+        next(p for p in second_paths if "deployment" in p.name).read_text()
+    )
+    second_checksum = second_deployment["spec"]["template"]["metadata"]["annotations"][
+        "checksum/config"
+    ]
+
+    assert first_checksum != second_checksum
+
+
 def test_generate_website_no_config_no_configmap(tmp_path: Path) -> None:
     """Website without config should not generate ConfigMaps."""
     templates_dir = tmp_path / "templates"
