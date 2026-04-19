@@ -14,7 +14,7 @@ from manifest_builder.generator import (
     _make_k8s_name,
     _write_documents,
 )
-from manifest_builder.website import _make_configmaps
+from manifest_builder.website import _config_checksum, _make_configmaps
 
 
 def generate_simple(
@@ -58,8 +58,32 @@ def generate_simple(
     if config.config:
         k8s_name = _make_k8s_name(config.name)
         configmaps = _make_configmaps(k8s_name, config.config)
+        checksum = _config_checksum(configmaps)
         for cm in configmaps:
             cm.setdefault("metadata", {})["namespace"] = config.namespace
         docs.extend(configmaps)
+
+        mount_groups = {
+            Path(container_path).parts[1] for container_path in config.config
+        }
+        for doc in docs:
+            if doc.get("kind") == "Deployment":
+                doc.setdefault("spec", {}).setdefault("template", {}).setdefault(
+                    "metadata", {}
+                ).setdefault("annotations", {})["checksum/config"] = checksum
+                pod_spec = (
+                    doc.setdefault("spec", {})
+                    .setdefault("template", {})
+                    .setdefault("spec", {})
+                )
+                for top_level in sorted(mount_groups):
+                    cm_name = f"{k8s_name}-{top_level}"
+                    for container in pod_spec.get("containers", []):
+                        container.setdefault("volumeMounts", []).append(
+                            {"name": cm_name, "mountPath": f"/{top_level}"}
+                        )
+                    pod_spec.setdefault("volumes", []).append(
+                        {"name": cm_name, "configMap": {"name": cm_name}}
+                    )
 
     return _write_documents(docs, output_dir, config.namespace, config.name)
