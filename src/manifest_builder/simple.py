@@ -14,7 +14,11 @@ from manifest_builder.generator import (
     _make_k8s_name,
     _write_documents,
 )
-from manifest_builder.website import _config_checksum, _make_configmaps
+from manifest_builder.website import (
+    _config_checksum,
+    _configmap_suffix_from_mount_path,
+    _make_configmaps,
+)
 
 
 def generate_simple(
@@ -64,7 +68,7 @@ def generate_simple(
         docs.extend(configmaps)
 
         mount_groups = {
-            Path(container_path).parts[1] for container_path in config.config
+            str(Path(container_path).parent) for container_path in config.config
         }
         for doc in docs:
             if doc.get("kind") == "Deployment":
@@ -76,11 +80,13 @@ def generate_simple(
                     .setdefault("template", {})
                     .setdefault("spec", {})
                 )
-                for top_level in sorted(mount_groups):
-                    cm_name = f"{k8s_name}-{top_level}"
+                for mount_path in sorted(mount_groups):
+                    cm_name = (
+                        f"{k8s_name}-{_configmap_suffix_from_mount_path(mount_path)}"
+                    )
                     for container in pod_spec.get("containers", []):
                         container.setdefault("volumeMounts", []).append(
-                            {"name": cm_name, "mountPath": f"/{top_level}"}
+                            {"name": cm_name, "mountPath": mount_path}
                         )
                     pod_spec.setdefault("volumes", []).append(
                         {"name": cm_name, "configMap": {"name": cm_name}}

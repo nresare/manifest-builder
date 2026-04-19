@@ -723,6 +723,53 @@ def test_generate_website_injects_volume_and_mount(tmp_path: Path) -> None:
     )
 
 
+def test_generate_website_mounts_nested_config_at_parent_directory(
+    tmp_path: Path,
+) -> None:
+    """Nested config paths should mount at their full parent directory."""
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+
+    (templates_dir / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{k8s_name}}\nspec:\n  template:\n    metadata:\n      labels:\n        app: {{k8s_name}}\n    spec:\n      containers:\n      - name: {{k8s_name}}\n        image: {{image}}\n"
+    )
+
+    config_file = tmp_path / "config.cfg"
+    config_file.write_text("setting=true\n")
+
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="myapp:1.0",
+        config={"/etc/acme-dns/config.cfg": config_file},
+    )
+    paths = generate_website(
+        config, tmp_path / "output", _templates_override=templates_dir
+    )
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+    configmap_path = next(p for p in paths if "configmap" in p.name)
+    configmap_doc = yaml.safe_load(configmap_path.read_text())
+
+    assert configmap_doc["metadata"]["name"] == "my-app-etc-acme-dns"
+    assert configmap_doc["data"]["config.cfg"] == "setting=true\n"
+
+    volumes = deployment_doc["spec"]["template"]["spec"]["volumes"]
+    assert any(
+        v["name"] == "my-app-etc-acme-dns"
+        and v.get("configMap", {}).get("name") == "my-app-etc-acme-dns"
+        for v in volumes
+    )
+
+    containers = deployment_doc["spec"]["template"]["spec"]["containers"]
+    mounts = containers[0]["volumeMounts"]
+    assert any(
+        m["name"] == "my-app-etc-acme-dns" and m["mountPath"] == "/etc/acme-dns"
+        for m in mounts
+    )
+
+
 def test_generate_website_adds_config_checksum_annotation(tmp_path: Path) -> None:
     """Deployment pod template should include a config checksum annotation."""
     templates_dir = tmp_path / "templates"

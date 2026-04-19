@@ -233,6 +233,57 @@ spec:
     )
 
 
+def test_generate_simple_mounts_nested_config_at_parent_directory(
+    tmp_path: Path,
+) -> None:
+    """Nested config paths should mount at their full parent directory."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "deployment.yaml").write_text(
+        """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acme-dns
+spec:
+  template:
+    spec:
+      containers:
+      - name: acme-dns
+        image: example.com/acme-dns:1.0
+"""
+    )
+    cfg_file = tmp_path / "config.cfg"
+    cfg_file.write_text("setting=true\n")
+
+    output_dir = tmp_path / "output"
+    config = _make_config(
+        tmp_path,
+        manifests_dir,
+        config={"/etc/acme-dns/config.cfg": cfg_file},
+    )
+    generate_simple(config, output_dir)
+
+    deployment = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
+    pod_spec = deployment["spec"]["template"]["spec"]
+    configmap = _read_yaml(
+        output_dir / "acme-dns" / "configmap-acme-dns-etc-acme-dns.yaml"
+    )
+
+    assert configmap["metadata"]["name"] == "acme-dns-etc-acme-dns"
+    assert configmap["data"]["config.cfg"] == "setting=true\n"
+    assert any(
+        volume["name"] == "acme-dns-etc-acme-dns"
+        and volume["configMap"]["name"] == "acme-dns-etc-acme-dns"
+        for volume in pod_spec["volumes"]
+    )
+    assert any(
+        mount["name"] == "acme-dns-etc-acme-dns"
+        and mount["mountPath"] == "/etc/acme-dns"
+        for mount in pod_spec["containers"][0]["volumeMounts"]
+    )
+
+
 def test_generate_simple_adds_config_checksum_annotation(tmp_path: Path) -> None:
     """Deployment pod template should include a config checksum annotation."""
     manifests_dir = tmp_path / "manifests"

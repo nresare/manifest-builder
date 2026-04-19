@@ -67,33 +67,46 @@ def _secret_name_from_mount_path(mount_path: str) -> str:
 
 
 def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]:
-    """Build ConfigMap objects grouped by the first component of each container path.
+    """Build ConfigMap objects grouped by the parent directory of each path.
 
     Args:
         k8s_name: Kubernetes-safe name for the website (used in ConfigMap names)
         config_files: Dict mapping container path -> resolved local file path
 
     Returns:
-        List of ConfigMap dictionaries grouped by top-level directory
+        List of ConfigMap dictionaries grouped by parent directory
     """
     groups: dict[str, dict[str, str]] = {}
     for container_path, local_path in config_files.items():
-        parts = Path(container_path).parts
-        if len(parts) < 2:
+        path = Path(container_path)
+        if not path.is_absolute():
             raise ValueError(f"Config file path must be absolute: {container_path}")
-        top_level = parts[1]
-        data_key = str(Path(*parts[2:])) if len(parts) > 2 else "."
-        groups.setdefault(top_level, {})[data_key] = local_path.read_text()
+        mount_path = str(path.parent)
+        if mount_path == ".":
+            raise ValueError(
+                f"Config file path must include a filename: {container_path}"
+            )
+        data_key = path.name
+        groups.setdefault(mount_path, {})[data_key] = local_path.read_text()
 
     return [
         {
             "apiVersion": "v1",
             "kind": "ConfigMap",
-            "metadata": {"name": f"{k8s_name}-{top_level}"},
+            "metadata": {
+                "name": f"{k8s_name}-{_configmap_suffix_from_mount_path(mount_path)}"
+            },
             "data": data,
         }
-        for top_level, data in sorted(groups.items())
+        for mount_path, data in sorted(groups.items())
     ]
+
+
+def _configmap_suffix_from_mount_path(mount_path: str) -> str:
+    """Generate a ConfigMap name suffix from a mount path."""
+    if mount_path == "/":
+        return "root"
+    return mount_path.lstrip("/").replace("/", "-")
 
 
 def _config_checksum(configmaps: list[dict]) -> str:
@@ -274,7 +287,7 @@ def generate_website(
 
         # Determine mount points from config (grouped by top-level directory)
         mount_groups = {
-            Path(container_path).parts[1] for container_path in config.config
+            str(Path(container_path).parent) for container_path in config.config
         }
         for doc in docs:
             if doc.get("kind") == "Deployment":
@@ -286,12 +299,14 @@ def generate_website(
                     .setdefault("template", {})
                     .setdefault("spec", {})
                 )
-                for top_level in sorted(mount_groups):
-                    cm_name = f"{k8s_name}-{top_level}"
+                for mount_path in sorted(mount_groups):
+                    cm_name = (
+                        f"{k8s_name}-{_configmap_suffix_from_mount_path(mount_path)}"
+                    )
                     # Add volumeMount to each container
                     for container in pod_spec.get("containers", []):
                         container.setdefault("volumeMounts", []).append(
-                            {"name": cm_name, "mountPath": f"/{top_level}"}
+                            {"name": cm_name, "mountPath": mount_path}
                         )
                     # Add volume at pod level
                     pod_spec.setdefault("volumes", []).append(
