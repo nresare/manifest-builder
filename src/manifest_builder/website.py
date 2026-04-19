@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Website manifest generation from Mustache templates."""
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +94,21 @@ def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]
         }
         for top_level, data in sorted(groups.items())
     ]
+
+
+def _config_checksum(configmaps: list[dict]) -> str:
+    """Build a deterministic checksum for generated ConfigMap contents."""
+    normalized = [
+        {
+            "name": configmap["metadata"]["name"],
+            "data": {
+                key: value for key, value in sorted(configmap.get("data", {}).items())
+            },
+        }
+        for configmap in sorted(configmaps, key=lambda item: item["metadata"]["name"])
+    ]
+    payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _inject_custom_token_projection(doc: dict, audience: str) -> None:
@@ -249,6 +266,7 @@ def generate_website(
     if config.config:
         k8s_name = _make_k8s_name(config.name)
         configmaps = _make_configmaps(k8s_name, config.config)
+        checksum = _config_checksum(configmaps)
         # Inject namespace into ConfigMaps (they're added after the main namespace loop)
         for cm in configmaps:
             cm.setdefault("metadata", {})["namespace"] = config.namespace
@@ -260,6 +278,9 @@ def generate_website(
         }
         for doc in docs:
             if doc.get("kind") == "Deployment":
+                doc.setdefault("spec", {}).setdefault("template", {}).setdefault(
+                    "metadata", {}
+                ).setdefault("annotations", {})["checksum/config"] = checksum
                 pod_spec = (
                     doc.setdefault("spec", {})
                     .setdefault("template", {})
