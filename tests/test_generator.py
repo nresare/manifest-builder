@@ -162,6 +162,47 @@ def test_strip_helm_metadata_handles_null_labels() -> None:
     assert doc["metadata"]["annotations"] is None
 
 
+def test_write_manifests_handles_null_annotations(tmp_path: Path) -> None:
+    """Documents emitted by the cilium chart contain `annotations:` with a null value.
+
+    The hook-filter code path reaches `.get("annotations", {}).get("helm.sh/hook")`;
+    because `.get(key, default)` only uses the default when the key is absent,
+    a null annotations value used to surface as `AttributeError: 'NoneType' object
+    has no attribute 'get'`. See cilium 1.19.3 Namespace/cilium-secrets.
+    """
+    cilium_namespace_yaml = """\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: "cilium-secrets"
+  labels:
+    app.kubernetes.io/part-of: cilium
+  annotations:
+"""
+    paths = write_manifests(cilium_namespace_yaml, tmp_path, "default")
+    assert len(paths) == 1
+
+
+def test_write_manifests_raises_on_non_dict_annotations(tmp_path: Path) -> None:
+    """A YAML document with non-dict annotations should raise a descriptive error."""
+    yaml_bad_annotations = """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+  annotations: "not-a-dict"
+data: {}
+"""
+    with pytest.raises(
+        TypeError,
+        match=(
+            r"failed to read annotations on object ConfigMap from mychart, "
+            r"item annotations is not a dict"
+        ),
+    ):
+        write_manifests(yaml_bad_annotations, tmp_path, "default", app_name="mychart")
+
+
 def test_write_manifests_returns_paths_for_stale_file_removal(tmp_path: Path) -> None:
     stale = tmp_path / "default" / "configmap-old.yaml"
     stale.parent.mkdir(parents=True)
