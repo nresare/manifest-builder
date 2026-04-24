@@ -27,7 +27,8 @@ class ManifestError(Exception):
 
     def __init__(self, config_name: str, cause: Exception) -> None:
         self.config_name = config_name
-        super().__init__(str(cause))
+        self.cause = cause
+        super().__init__(f"{type(cause).__name__}: {cause}")
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -557,7 +558,7 @@ def _write_documents(
     written: set[Path] = set()
     for doc in documents:
         kind = doc.get("kind", "unknown")
-        name = (doc.get("metadata") or {}).get("name", "unknown")
+        name = doc.get("metadata", {}).get("name", "unknown")
         try:
             strip_helm_metadata(doc)
         except Exception as e:
@@ -619,9 +620,15 @@ def write_manifests(
     # Filter out Helm test hook documents and log them
     filtered_documents = []
     for doc in documents:
-        hook_value = doc.get("metadata", {}).get("annotations", {}).get("helm.sh/hook")
+        kind = doc.get("kind", "unknown")
+        annotations = doc.get("metadata", {}).get("annotations") or {}
+        if not isinstance(annotations, dict):
+            raise TypeError(
+                f"failed to read annotations on object {kind} from {app_name}, "
+                f"item annotations is not a dict"
+            )
+        hook_value = annotations.get("helm.sh/hook")
         if hook_value is not None:
-            kind = doc.get("kind")
             name = doc.get("metadata", {}).get("name")
             logger.info(f"Skipping {kind} {name} (helm.sh/hook={hook_value})")
         else:
