@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from manifest_builder._version import __version__
+from manifest_builder import __version__
 from manifest_builder.config import load_configs, load_images, resolve_configs
 from manifest_builder.generator import ManifestError, generate_manifests, setup_logging
 from manifest_builder.git_utils import (
