@@ -12,6 +12,7 @@ from manifest_builder.config import load_configs, load_images, resolve_configs
 from manifest_builder.generator import ManifestError, generate_manifests, setup_logging
 from manifest_builder.git_utils import (
     create_manifest_commit,
+    get_manifest_diff,
     get_git_commit,
     is_git_dirty,
 )
@@ -49,6 +50,12 @@ from manifest_builder.helmfile import load_helmfile
     help="Create a git commit in the output directory with generated manifests",
 )
 @click.option(
+    "--diff",
+    "show_diff",
+    is_flag=True,
+    help="Print a git diff of the generated manifest changes without committing",
+)
+@click.option(
     "--allow-dirty-config",
     is_flag=True,
     help="Allow creation of commit even if config directory has local changes",
@@ -58,12 +65,16 @@ def main(
     output_dir: Path,
     verbose: bool,
     create_commit: bool,
+    show_diff: bool,
     allow_dirty_config: bool,
 ) -> None:
     """Generate Kubernetes manifests from Helm charts."""
     setup_logging(verbose=verbose)
 
     try:
+        if create_commit and show_diff:
+            raise ValueError("Use only one of --create-commit or --diff.")
+
         # Log helm version
         helm_version = get_helm_version()
         import logging
@@ -103,10 +114,14 @@ def main(
         images = load_images(config_dir)
 
         # Fail fast before the time-consuming generation step
-        if create_commit and is_git_dirty(config_dir) and not allow_dirty_config:
+        if (
+            (create_commit or show_diff)
+            and is_git_dirty(config_dir)
+            and not allow_dirty_config
+        ):
             raise ValueError(
                 "Config directory has local changes. Use --allow-dirty-config "
-                "to allow commit creation with uncommitted changes."
+                "to allow commit/diff creation with uncommitted changes."
             )
 
         # Generate manifests
@@ -118,7 +133,13 @@ def main(
             verbose=verbose,
         )
 
-        # Create commit if requested
+        if show_diff:
+            diff_output = get_manifest_diff(output_dir, written_paths)
+            if diff_output:
+                click.echo(diff_output, nl=False)
+            else:
+                click.echo("The output is identical before and after this change")
+
         if create_commit:
             config_commit = get_git_commit(config_dir)
             create_manifest_commit(
