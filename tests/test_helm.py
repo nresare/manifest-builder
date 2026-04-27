@@ -2,20 +2,36 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Tests for helm command execution."""
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from manifest_builder.helm import pull_chart
+import pytest
+
+from manifest_builder.helm import ChartCacheStats, pull_chart
 
 
-def test_pull_chart_uses_cached_chart(tmp_path: Path) -> None:
+def test_pull_chart_uses_cached_chart(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """pull_chart should skip download if chart already exists."""
     chart_dir = tmp_path / "myapp"
     chart_dir.mkdir()
+    cache_stats = ChartCacheStats()
 
-    result = pull_chart("myapp", tmp_path, repo="https://charts.example.com")
+    caplog.set_level(logging.DEBUG, logger="manifest_builder.helm")
+    result = pull_chart(
+        "myapp", tmp_path, repo="https://charts.example.com", cache_stats=cache_stats
+    )
 
     assert result == chart_dir
+    assert "Chart cache hit: myapp" in caplog.text
+    assert cache_stats.hits == 1
+    assert cache_stats.misses == 0
+    cache_records = [
+        record for record in caplog.records if record.message.startswith("Chart cache")
+    ]
+    assert [record.levelno for record in cache_records] == [logging.DEBUG]
 
 
 def test_pull_chart_oci_uses_cached_chart(tmp_path: Path) -> None:
@@ -30,12 +46,20 @@ def test_pull_chart_oci_uses_cached_chart(tmp_path: Path) -> None:
 
 
 @patch("manifest_builder.helm.subprocess.run")
-def test_pull_chart_http_repository(mock_run: MagicMock, tmp_path: Path) -> None:
+def test_pull_chart_http_repository(
+    mock_run: MagicMock, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """pull_chart should use --repo for HTTP/HTTPS repositories."""
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    cache_stats = ChartCacheStats()
 
+    caplog.set_level(logging.DEBUG, logger="manifest_builder.helm")
     pull_chart(
-        "cert-manager", tmp_path, repo="https://charts.jetstack.io", version="v1.19.4"
+        "cert-manager",
+        tmp_path,
+        repo="https://charts.jetstack.io",
+        version="v1.19.4",
+        cache_stats=cache_stats,
     )
 
     # Verify the command structure
@@ -49,6 +73,15 @@ def test_pull_chart_http_repository(mock_run: MagicMock, tmp_path: Path) -> None
     assert "https://charts.jetstack.io" in cmd
     assert "--version" in cmd
     assert "v1.19.4" in cmd
+    assert "Chart cache miss: cert-manager" in caplog.text
+    assert cache_stats.hits == 0
+    assert cache_stats.misses == 1
+    miss_records = [
+        record
+        for record in caplog.records
+        if record.message.startswith("Chart cache miss:")
+    ]
+    assert [record.levelno for record in miss_records] == [logging.DEBUG]
 
 
 @patch("manifest_builder.helm.subprocess.run")

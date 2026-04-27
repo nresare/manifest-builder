@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Tests for Helm manifest generation and writing."""
 
+import logging
 from pathlib import Path
 from unittest import mock
 
@@ -14,6 +15,7 @@ from manifest_builder.generator import (
     _ensure_namespaces,
     _generate_helm_manifests,
     _make_k8s_name,
+    generate_manifests,
     strip_helm_metadata,
     write_manifests,
 )
@@ -81,6 +83,82 @@ def test_write_manifests_skips_empty_documents(tmp_path: Path) -> None:
     yaml_with_empty = "---\n" + NAMESPACED_YAML + "---\n"
     paths = write_manifests(yaml_with_empty, tmp_path, "default")
     assert len(paths) == 1
+
+
+def test_write_manifests_summarizes_skipped_helm_hooks(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Helm hook objects should be summarized at info level and detailed at debug."""
+    yaml_with_hooks = """\
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: my-hook
+  annotations:
+    helm.sh/hook: post-install
+spec: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-other-hook
+  annotations:
+    helm.sh/hook: pre-install
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+data: {}
+"""
+    caplog.set_level(logging.DEBUG, logger="manifest_builder.generator")
+
+    paths = write_manifests(yaml_with_hooks, tmp_path, "default")
+
+    assert len(paths) == 1
+    assert "Skipped 2 helm hook objects" in caplog.text
+    assert "Skipping Job my-hook (helm.sh/hook=post-install)" in caplog.text
+    assert "Skipping ServiceAccount my-other-hook (helm.sh/hook=pre-install)" in (
+        caplog.text
+    )
+    summary_records = [
+        record
+        for record in caplog.records
+        if record.message == "Skipped 2 helm hook objects"
+    ]
+    detail_records = [
+        record for record in caplog.records if record.message.startswith("Skipping ")
+    ]
+    assert [record.levelno for record in summary_records] == [logging.INFO]
+    assert {record.levelno for record in detail_records} == {logging.DEBUG}
+
+
+def test_generate_manifests_summarizes_chart_cache(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Chart cache hit/miss details should be summarized once per generation run."""
+    charts_dir = tmp_path / "charts"
+    chart_dir = charts_dir / "my-chart-1.0" / "my-chart"
+    chart_dir.mkdir(parents=True)
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="my-chart",
+        repo="https://charts.example.com",
+        version="1.0",
+        values=[],
+        release=None,
+    )
+    caplog.set_level(logging.INFO, logger="manifest_builder.generator")
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template", return_value=NAMESPACED_YAML
+    ):
+        generate_manifests(
+            [config], tmp_path / "out", repo_root=tmp_path, charts_dir=charts_dir
+        )
+
+    assert "Chart cache: 1 hit(s), 0 miss(es)" in caplog.text
 
 
 def test_strip_helm_metadata_removes_helm_labels() -> None:

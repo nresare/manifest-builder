@@ -4,9 +4,20 @@
 
 import logging
 import subprocess
+import time
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ChartCacheStats:
+    """Track chart cache behavior during one manifest generation run."""
+
+    hits: int = 0
+    misses: int = 0
 
 
 def get_helm_version() -> str:
@@ -38,6 +49,7 @@ def get_helm_version() -> str:
         raise RuntimeError("helm version check timed out") from e
 
 
+@cache
 def check_helm_available() -> bool:
     """
     Check if helm is installed and available.
@@ -62,6 +74,7 @@ def pull_chart(
     dest: Path,
     repo: str | None = None,
     version: str | None = None,
+    cache_stats: ChartCacheStats | None = None,
 ) -> Path:
     """
     Pull a chart from a repository and untar it to a local directory.
@@ -73,6 +86,7 @@ def pull_chart(
         dest: Directory to untar the chart into
         repo: Optional repository URL (for HTTP/HTTPS repos)
         version: Optional chart version
+        cache_stats: Optional cache hit/miss counter to update
 
     Returns:
         Path to the untarred chart directory
@@ -89,13 +103,18 @@ def pull_chart(
     chart_dir = dest / actual_chart_name
 
     if chart_dir.exists():
-        logger.debug(f"Using cached chart at {chart_dir}")
+        if cache_stats is not None:
+            cache_stats.hits += 1
+        logger.debug(f"Chart cache hit: {chart} -> {chart_dir}")
         return chart_dir
 
     dest.mkdir(parents=True, exist_ok=True)
 
     version_str = f" (version {version})" if version else ""
     source_str = f" from {repo}" if repo else ""
+    if cache_stats is not None:
+        cache_stats.misses += 1
+    logger.debug(f"Chart cache miss: {chart} -> {chart_dir}")
     logger.info(f"Downloading chart {chart}{source_str}{version_str}")
 
     cmd = ["helm", "pull"]
@@ -112,6 +131,7 @@ def pull_chart(
     logger.debug(f"Executing: {' '.join(cmd)}")
 
     try:
+        start = time.perf_counter()
         subprocess.run(
             cmd,
             capture_output=True,
@@ -119,6 +139,8 @@ def pull_chart(
             check=True,
             timeout=120,
         )
+        elapsed = time.perf_counter() - start
+        logger.info(f"Downloaded chart {chart} in {elapsed:.2f}s")
         logger.debug(f"Successfully unpacked chart to {chart_dir}")
     except subprocess.CalledProcessError as e:
         cmd_str = " ".join(cmd)
@@ -181,6 +203,7 @@ def run_helm_template(
     logger.debug(f"Executing: {' '.join(cmd)}")
 
     try:
+        start = time.perf_counter()
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -188,6 +211,8 @@ def run_helm_template(
             check=True,
             timeout=60,
         )
+        elapsed = time.perf_counter() - start
+        logger.debug(f"helm template for {release_name} completed in {elapsed:.2f}s")
         return result.stdout
     except subprocess.CalledProcessError as e:
         cmd_str = " ".join(cmd)

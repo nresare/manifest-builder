@@ -4,7 +4,9 @@
 
 import logging
 import tempfile
+import time
 from pathlib import Path
+from typing import Any
 
 import pystache
 import yaml
@@ -17,9 +19,12 @@ from manifest_builder.config import (
     WebsiteConfig,
     validate_config,
 )
-from manifest_builder.helm import pull_chart, run_helm_template
+from manifest_builder.helm import ChartCacheStats, pull_chart, run_helm_template
 
 logger = logging.getLogger(__name__)
+
+YAML_LOADER: type[yaml.SafeLoader] = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+YAML_DUMPER: type[yaml.Dumper] = yaml.Dumper
 
 
 class ManifestError(Exception):
@@ -57,8 +62,23 @@ def _literal_str_representer(dumper: yaml.Dumper, data: str) -> yaml.Node:
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
-# Register the custom representer for multi-line strings
-yaml.add_representer(str, _literal_str_representer)
+# Register the custom representer for multi-line strings.
+yaml.add_representer(str, _literal_str_representer, Dumper=YAML_DUMPER)
+
+
+def _load_all_yaml(content: str) -> list[Any]:
+    return [doc for doc in yaml.load_all(content, Loader=YAML_LOADER) if doc]
+
+
+def _dump_yaml(doc: Any, stream: Any) -> None:
+    yaml.dump(
+        doc,
+        stream,
+        Dumper=YAML_DUMPER,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+
 
 # Kubernetes resource kinds that are cluster-scoped (not namespaced)
 CLUSTER_SCOPED_KINDS = {
@@ -90,6 +110,7 @@ def _generate_helm_manifests(
     charts_dir: Path,
     verbose: bool = False,
     images: dict[str, str] | None = None,
+    cache_stats: ChartCacheStats | None = None,
 ) -> set[Path]:
     """Generate manifests from a Helm chart.
 
@@ -98,6 +119,7 @@ def _generate_helm_manifests(
         output_dir: Directory to write generated manifests
         charts_dir: Directory for caching pulled charts
         verbose: If True, log detailed output
+        cache_stats: Optional chart cache hit/miss counter to update
 
     Returns:
         Set of paths written
@@ -129,23 +151,13 @@ def _generate_helm_manifests(
 
         pull_dest = charts_dir / f"{chart_slug}{version_suffix}"
 
-        # Determine the actual chart name to check for existence
-        if config.chart.startswith("oci://"):
-            actual_chart_name = config.chart.rstrip("/").split("/")[-1]
-        else:
-            actual_chart_name = config.chart
-
-        if (pull_dest / actual_chart_name).exists():
-            logger.debug(f"Using cached chart at {pull_dest / actual_chart_name}")
-        else:
-            logger.debug(f"Pulling chart to {pull_dest / actual_chart_name}")
-
         chart_path = str(
             pull_chart(
                 chart=config.chart,
                 dest=pull_dest,
                 repo=config.repo,
                 version=config.version,
+                cache_stats=cache_stats,
             )
         )
     else:
@@ -168,7 +180,7 @@ def _generate_helm_manifests(
 
     # Inject init container if configured
     if config.init:
-        docs = [d for d in yaml.safe_load_all(manifest_content) if d]
+        docs = _load_all_yaml(manifest_content)
         deployments = [d for d in docs if d.get("kind") == "Deployment"]
         if len(deployments) != 1:
             raise ValueError(
@@ -209,7 +221,13 @@ def _generate_helm_manifests(
         import io
 
         stream = io.StringIO()
-        yaml.dump_all(docs, stream, default_flow_style=False, sort_keys=False)
+        yaml.dump_all(
+            docs,
+            stream,
+            Dumper=YAML_DUMPER,
+            default_flow_style=False,
+            sort_keys=False,
+        )
         manifest_content = stream.getvalue()
 
     paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
@@ -220,16 +238,16 @@ def _generate_helm_manifests(
         crds_dir = chart_dir_path / "crds"
         if crds_dir.is_dir():
             crd_docs: list[dict] = []
+            start = time.perf_counter()
             for yaml_file in sorted(crds_dir.glob("**/*.yaml")):
-                for doc in yaml.safe_load_all(yaml_file.read_text()):
-                    if doc:
-                        crd_docs.append(doc)
+                crd_docs.extend(_load_all_yaml(yaml_file.read_text()))
             if crd_docs:
                 crd_paths = _write_documents(
                     crd_docs, output_dir, config.namespace, config.name
                 )
                 paths.update(crd_paths)
-                logger.info(f"Copied {len(crd_docs)} CRD(s)")
+                elapsed = time.perf_counter() - start
+                logger.info(f"Copied {len(crd_docs)} CRD(s) in {elapsed:.2f}s")
 
     # Handle extra resources if configured
     if config.extra_resources:
@@ -237,16 +255,13 @@ def _generate_helm_manifests(
         extra_docs: list[dict] = []
         for yaml_file in sorted(config.extra_resources.glob("*.yaml")):
             rendered = renderer.render(yaml_file.read_text(), values_context)
-            for doc in yaml.safe_load_all(rendered):
-                if doc:
-                    # Add namespace to namespaced resources without one
-                    kind = doc.get("kind")
-                    if kind and kind not in CLUSTER_SCOPED_KINDS:
-                        if "namespace" not in doc.get("metadata", {}):
-                            doc.setdefault("metadata", {})["namespace"] = (
-                                config.namespace
-                            )
-                    extra_docs.append(doc)
+            for doc in _load_all_yaml(rendered):
+                # Add namespace to namespaced resources without one
+                kind = doc.get("kind")
+                if kind and kind not in CLUSTER_SCOPED_KINDS:
+                    if "namespace" not in doc.get("metadata", {}):
+                        doc.setdefault("metadata", {})["namespace"] = config.namespace
+                extra_docs.append(doc)
         if extra_docs:
             extra_paths = _write_documents(
                 extra_docs, output_dir, config.namespace, config.name
@@ -318,6 +333,7 @@ def generate_manifests(
     # Generate manifests
     # Map the output paths to the config name that generated them
     written_paths: dict[Path, str] = {}
+    cache_stats = ChartCacheStats()
     for config in configs:
         try:
             if isinstance(config, WebsiteConfig):
@@ -336,7 +352,12 @@ def generate_manifests(
                 paths = generate_simple(config, output_dir, images=images)
             else:
                 paths = _generate_helm_manifests(
-                    config, output_dir, charts_dir, verbose, images=images
+                    config,
+                    output_dir,
+                    charts_dir,
+                    verbose,
+                    images=images,
+                    cache_stats=cache_stats,
                 )
 
             # Check for conflicts with the previously written files
@@ -369,6 +390,11 @@ def generate_manifests(
 
     # Remove any stale files left over from the previous runs
     _cleanup_stale_files(output_dir, written_paths)
+
+    if cache_stats.hits or cache_stats.misses:
+        logger.info(
+            f"Chart cache: {cache_stats.hits} hit(s), {cache_stats.misses} miss(es)"
+        )
 
     total = len(written_paths)
     summary = f"Done! Generated {total} manifest(s)"
@@ -424,7 +450,7 @@ def _ensure_namespaces(
         }
         out_path = ns_dir / ns_filename
         with open(out_path, "w") as f:
-            yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
+            _dump_yaml(doc, f)
 
         logger.debug(f"Created Namespace {ns_name}")
         new_paths[out_path] = "__namespaces__"
@@ -582,7 +608,7 @@ def _write_documents(
         with open(output_path, "w") as f:
             if app_name:
                 f.write(f"# Source: {app_name}\n")
-            yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
+            _dump_yaml(doc, f)
 
         logger.debug(f"Wrote {subdir}/{filename}")
         written.add(output_path)
@@ -615,10 +641,11 @@ def write_manifests(
     Raises:
         OSError: If files cannot be written
     """
-    documents = [doc for doc in yaml.safe_load_all(content) if doc]
+    documents = _load_all_yaml(content)
 
     # Filter out Helm test hook documents and log them
     filtered_documents = []
+    skipped_hooks = 0
     for doc in documents:
         kind = doc.get("kind", "unknown")
         annotations = doc.get("metadata", {}).get("annotations") or {}
@@ -630,10 +657,13 @@ def write_manifests(
         hook_value = annotations.get("helm.sh/hook")
         if hook_value is not None:
             name = doc.get("metadata", {}).get("name")
-            logger.info(f"Skipping {kind} {name} (helm.sh/hook={hook_value})")
+            skipped_hooks += 1
+            logger.debug(f"Skipping {kind} {name} (helm.sh/hook={hook_value})")
         else:
             filtered_documents.append(doc)
     documents = filtered_documents
+    if skipped_hooks:
+        logger.info(f"Skipped {skipped_hooks} helm hook objects")
 
     # Add namespace to namespaced resources that don't already have one
     for doc in documents:
