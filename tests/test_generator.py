@@ -161,6 +161,99 @@ def test_generate_manifests_summarizes_chart_cache(
     assert "Chart cache: 1 hit, 0 misses" in caplog.text
 
 
+def test_generate_manifests_rejects_config_in_owned_namespace(tmp_path: Path) -> None:
+    """Configs targeting an externally-owned namespace must be rejected."""
+    config = ChartConfig(
+        name="my-chart",
+        namespace="team-a",
+        chart=str(tmp_path / "chart"),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+    )
+    (tmp_path / "chart").mkdir()
+
+    with pytest.raises(ValueError, match="owned by another service"):
+        generate_manifests(
+            [config],
+            tmp_path / "out",
+            repo_root=tmp_path,
+            owned_namespaces={"team-a"},
+        )
+
+
+def test_generate_manifests_preserves_files_in_owned_namespace(tmp_path: Path) -> None:
+    """Pre-existing files in owned namespace directories must survive cleanup."""
+    output_dir = tmp_path / "out"
+    owned_file = output_dir / "team-a" / "configmap-foo.yaml"
+    owned_file.parent.mkdir(parents=True)
+    owned_file.write_text("# owned by team-a\n")
+
+    chart_dir = tmp_path / "charts" / "my-chart-1.0" / "my-chart"
+    chart_dir.mkdir(parents=True)
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="my-chart",
+        repo="https://charts.example.com",
+        version="1.0",
+        values=[],
+        release=None,
+    )
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template", return_value=NAMESPACED_YAML
+    ):
+        written = generate_manifests(
+            [config],
+            output_dir,
+            repo_root=tmp_path,
+            charts_dir=tmp_path / "charts",
+            owned_namespaces={"team-a"},
+        )
+
+    assert owned_file.exists()
+    assert owned_file not in written
+
+
+def test_generate_manifests_rejects_output_landing_in_owned_namespace(
+    tmp_path: Path,
+) -> None:
+    """A doc whose metadata.namespace targets an owned namespace must fail."""
+    chart_dir = tmp_path / "charts" / "my-chart-1.0" / "my-chart"
+    chart_dir.mkdir(parents=True)
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="my-chart",
+        repo="https://charts.example.com",
+        version="1.0",
+        values=[],
+        release=None,
+    )
+    intrusive_yaml = """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: foo
+  namespace: team-a
+data: {}
+"""
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template", return_value=intrusive_yaml
+    ):
+        with pytest.raises(ValueError, match="owned by another service"):
+            generate_manifests(
+                [config],
+                tmp_path / "out",
+                repo_root=tmp_path,
+                charts_dir=tmp_path / "charts",
+                owned_namespaces={"team-a"},
+            )
+
+
 def test_strip_helm_metadata_removes_helm_labels() -> None:
     doc = {
         "metadata": {

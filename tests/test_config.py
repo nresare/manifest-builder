@@ -14,6 +14,7 @@ from manifest_builder.config import (
     WebsiteConfig,
     load_configs,
     load_images,
+    load_owned_namespaces,
     resolve_configs,
     validate_config,
 )
@@ -1207,3 +1208,83 @@ def test_load_images_raises_on_invalid_entry(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must have 'repo' and 'version' fields"):
         load_images(conf_dir)
+
+
+# ---------------------------------------------------------------------------
+# load_owned_namespaces
+# ---------------------------------------------------------------------------
+
+
+def test_load_owned_namespaces_returns_empty_when_dir_missing(tmp_path: Path) -> None:
+    """No owners directory means no namespaces are owned by others."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+
+    assert load_owned_namespaces(conf_dir) == set()
+
+
+def test_load_owned_namespaces_single_namespace_key(tmp_path: Path) -> None:
+    """A 'namespace' string adds one namespace to the owned set."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "team-a.toml").write_text('namespace = "team-a"\n')
+
+    assert load_owned_namespaces(tmp_path / "conf") == {"team-a"}
+
+
+def test_load_owned_namespaces_namespaces_list(tmp_path: Path) -> None:
+    """A 'namespaces' list adds each entry to the owned set."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "platform.toml").write_text(
+        'namespaces = ["monitoring", "logging"]\n'
+    )
+
+    assert load_owned_namespaces(tmp_path / "conf") == {"monitoring", "logging"}
+
+
+def test_load_owned_namespaces_combines_keys_across_files(tmp_path: Path) -> None:
+    """Both keys may appear, possibly in different files, and accumulate."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "team-a.toml").write_text(
+        'namespace = "team-a"\nnamespaces = ["alpha", "beta"]\n'
+    )
+    (owners_dir / "team-b.toml").write_text('namespace = "team-b"\n')
+
+    assert load_owned_namespaces(tmp_path / "conf") == {
+        "team-a",
+        "alpha",
+        "beta",
+        "team-b",
+    }
+
+
+def test_load_owned_namespaces_rejects_non_string_namespace(tmp_path: Path) -> None:
+    """A non-string 'namespace' value is a configuration error."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "bad.toml").write_text("namespace = 42\n")
+
+    with pytest.raises(ValueError, match="'namespace' must be a string"):
+        load_owned_namespaces(tmp_path / "conf")
+
+
+def test_load_owned_namespaces_rejects_non_list_namespaces(tmp_path: Path) -> None:
+    """A non-list 'namespaces' value is a configuration error."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "bad.toml").write_text('namespaces = "not-a-list"\n')
+
+    with pytest.raises(ValueError, match="'namespaces' must be a list of strings"):
+        load_owned_namespaces(tmp_path / "conf")
+
+
+def test_load_owned_namespaces_ignores_non_toml_files(tmp_path: Path) -> None:
+    """Files without a .toml suffix in owners/ are ignored."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "README.md").write_text("# notes\n")
+    (owners_dir / "team-a.toml").write_text('namespace = "team-a"\n')
+
+    assert load_owned_namespaces(tmp_path / "conf") == {"team-a"}

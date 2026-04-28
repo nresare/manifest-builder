@@ -2,15 +2,20 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Tests for git commit cleanup utilities."""
 
+import os
 import subprocess
 from pathlib import Path
 from unittest import mock
 
 from manifest_builder.git_utils import (
+    _prepare_manifest_changes,
     _remove_namespace_only_directories,
     create_manifest_commit,
     get_manifest_diff,
 )
+
+# Isolate test git invocations from the user's global config (e.g. commit.gpgsign).
+ISOLATED_GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null"}
 
 
 def test_remove_namespace_only_directories_prunes_orphaned_namespace(
@@ -139,11 +144,17 @@ def test_get_manifest_diff_reports_untracked_files_without_staging_them(
     tmp_path: Path,
 ) -> None:
     """Diff mode includes new files while preserving the real git index."""
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env=ISOLATED_GIT_ENV,
+    )
     existing = tmp_path / "default" / "configmap-app.yaml"
     existing.parent.mkdir()
     existing.write_text("apiVersion: v1\nkind: ConfigMap\n")
-    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, env=ISOLATED_GIT_ENV)
     subprocess.run(
         [
             "git",
@@ -158,6 +169,7 @@ def test_get_manifest_diff_reports_untracked_files_without_staging_them(
         cwd=tmp_path,
         check=True,
         capture_output=True,
+        env=ISOLATED_GIT_ENV,
     )
 
     existing.write_text("apiVersion: v1\nkind: ConfigMap\ndata: {}\n")
@@ -165,7 +177,9 @@ def test_get_manifest_diff_reports_untracked_files_without_staging_them(
     new_manifest.write_text("apiVersion: v1\nkind: ConfigMap\n")
     staged = tmp_path / "README.md"
     staged.write_text("Staged before diff mode\n")
-    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "add", "README.md"], cwd=tmp_path, check=True, env=ISOLATED_GIT_ENV
+    )
 
     diff = get_manifest_diff(tmp_path, {existing, new_manifest})
     status = subprocess.run(
@@ -184,3 +198,23 @@ def test_get_manifest_diff_reports_untracked_files_without_staging_them(
     )
     assert "A  README.md" in status
     assert "?? default/configmap-new.yaml" in status
+
+
+def test_prepare_manifest_changes_preserves_owned_namespace_files(
+    tmp_path: Path,
+) -> None:
+    """Pre-commit cleanup must leave files in owned namespace directories alone."""
+    owned = tmp_path / "team-a" / "configmap-foo.yaml"
+    owned.parent.mkdir(parents=True)
+    owned.write_text("apiVersion: v1\nkind: ConfigMap\n")
+    stale = tmp_path / "default" / "configmap-stale.yaml"
+    stale.parent.mkdir()
+    stale.write_text("apiVersion: v1\nkind: ConfigMap\n")
+    fresh = tmp_path / "default" / "configmap-fresh.yaml"
+    fresh.write_text("apiVersion: v1\nkind: ConfigMap\n")
+
+    _prepare_manifest_changes(tmp_path, {fresh}, owned_namespaces={"team-a"})
+
+    assert owned.exists()
+    assert fresh.exists()
+    assert not stale.exists()

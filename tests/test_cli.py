@@ -40,4 +40,4 @@ def test_diff_reports_when_output_is_identical(
     assert result.exit_code == 0
     assert "The output is identical before and after this change\n" in result.output
     mock_is_git_dirty.assert_called_once()
-    mock_get_manifest_diff.assert_called_once_with(Path.cwd() / "output", set())
+    mock_get_manifest_diff.assert_called_once_with(Path.cwd() / "output", set(), set())

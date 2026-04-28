@@ -8,7 +8,12 @@ from pathlib import Path
 import click
 
 from manifest_builder import __version__
-from manifest_builder.config import load_configs, load_images, resolve_configs
+from manifest_builder.config import (
+    load_configs,
+    load_images,
+    load_owned_namespaces,
+    resolve_configs,
+)
 from manifest_builder.generator import (
     ManifestError,
     generate_manifests,
@@ -119,6 +124,15 @@ def main(
         # Load container image definitions
         images = load_images(config_dir)
 
+        # Load namespaces owned by other services or pipelines
+        owned_namespaces = load_owned_namespaces(config_dir)
+        if verbose and owned_namespaces:
+            count = len(owned_namespaces)
+            click.echo(
+                f"Loaded {count} owned namespace{plural(count)}: "
+                f"{', '.join(sorted(owned_namespaces))}"
+            )
+
         # Fail fast before the time-consuming generation step
         if (
             (create_commit or show_diff)
@@ -137,10 +151,11 @@ def main(
             repo_root=repo_root,
             images=images,
             verbose=verbose,
+            owned_namespaces=owned_namespaces,
         )
 
         if show_diff:
-            diff_output = get_manifest_diff(output_dir, written_paths)
+            diff_output = get_manifest_diff(output_dir, written_paths, owned_namespaces)
             if diff_output:
                 click.echo(diff_output, nl=False)
             else:
@@ -149,7 +164,11 @@ def main(
         if create_commit:
             config_commit = get_git_commit(config_dir)
             create_manifest_commit(
-                output_dir, __version__, config_commit, written_paths
+                output_dir,
+                __version__,
+                config_commit,
+                written_paths,
+                owned_namespaces,
             )
             click.echo(f"✓ Created commit in {output_dir}")
 
