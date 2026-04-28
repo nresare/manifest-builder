@@ -28,6 +28,27 @@ run `uv sync`. Tests and checks can be run with the following commands:
 - Helm 3.x (must be installed and available in PATH)
 - Git (required for `--create-commit` and `--diff` features)
 
+## Externally-owned namespaces
+
+When the output repository is shared with other services or pipelines that
+make their own commits, manifest-builder can be told which namespace
+directories it does not own. Files in those directories are left alone during
+cleanup, and generation fails fast if any output would land in one of them.
+
+To declare ownership, add an `owners/` directory to your config directory and
+drop one or more TOML files into it. Each file may set either of:
+
+```toml
+# A single namespace owned by another pipeline:
+namespace = "team-a"
+
+# Or a list of namespaces:
+namespaces = ["monitoring", "logging"]
+```
+
+Both keys may appear in the same file, and entries from all `owners/*.toml`
+files are merged into a single set of externally-owned namespaces.
+
 ## License
 
 MIT

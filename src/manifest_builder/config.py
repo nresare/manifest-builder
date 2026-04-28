@@ -113,6 +113,40 @@ def load_images(config_dir: Path) -> dict[str, str]:
     return result
 
 
+def load_owned_namespaces(config_dir: Path) -> set[str]:
+    """Load the set of namespaces owned by other services or pipelines.
+
+    Reads ``<config_dir>/owners/*.toml``. Each file may declare ownership via
+    a ``namespace`` string or a ``namespaces`` list of strings (or both).
+    Returns an empty set if the ``owners`` directory does not exist.
+    """
+    owners_dir = config_dir / "owners"
+    if not owners_dir.is_dir():
+        return set()
+
+    owned: set[str] = set()
+    for toml_file in sorted(owners_dir.glob("*.toml")):
+        data = tomllib.loads(toml_file.read_text())
+
+        ns = data.get("namespace")
+        if ns is not None:
+            if not isinstance(ns, str):
+                raise ValueError(f"'namespace' must be a string in {toml_file}")
+            owned.add(ns)
+
+        ns_list = data.get("namespaces")
+        if ns_list is not None:
+            if not isinstance(ns_list, list) or not all(
+                isinstance(n, str) for n in ns_list
+            ):
+                raise ValueError(
+                    f"'namespaces' must be a list of strings in {toml_file}"
+                )
+            owned.update(ns_list)
+
+    return owned
+
+
 def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleConfig]:
     """
     Load all app configurations from TOML files in the config directory.
