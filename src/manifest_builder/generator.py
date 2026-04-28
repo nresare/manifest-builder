@@ -27,6 +27,10 @@ YAML_LOADER: type[yaml.SafeLoader] = getattr(yaml, "CSafeLoader", yaml.SafeLoade
 YAML_DUMPER: type[yaml.Dumper] = yaml.Dumper
 
 
+def plural(num: int, plural_form: str = "s") -> str:
+    return plural_form if num != 1 else ""
+
+
 class ManifestError(Exception):
     """Raised when manifest generation fails for a specific config."""
 
@@ -247,7 +251,9 @@ def _generate_helm_manifests(
                 )
                 paths.update(crd_paths)
                 elapsed = time.perf_counter() - start
-                logger.info(f"Copied {len(crd_docs)} CRD(s) in {elapsed:.2f}s")
+                logger.info(
+                    f"Copied {len(crd_docs)} CRD{plural(len(crd_docs))} in {elapsed:.2f}s"
+                )
 
     # Handle extra resources if configured
     if config.extra_resources:
@@ -376,7 +382,10 @@ def generate_manifests(
             for path in paths:
                 written_paths[path] = config.name
 
-            logger.info(f"✓ {config.name} ({config.namespace}) -> {len(paths)} file(s)")
+            count = len(paths)
+            logger.info(
+                f"✓ {config.name} ({config.namespace}) -> {count} file{plural(count)}"
+            )
 
         except ManifestError:
             raise
@@ -393,14 +402,15 @@ def generate_manifests(
 
     if cache_stats.hits or cache_stats.misses:
         logger.info(
-            f"Chart cache: {cache_stats.hits} hit(s), {cache_stats.misses} miss(es)"
+            f"Chart cache: {cache_stats.hits} hit{plural(cache_stats.hits)}, "
+            f"{cache_stats.misses} miss{plural(cache_stats.misses, 'es')}"
         )
 
     total = len(written_paths)
-    summary = f"Done! Generated {total} manifest(s)"
+    summary = f"Done! Generated {total} manifest{plural(total)}"
     removed = _count_removed_files(output_dir, written_paths)
     if removed:
-        summary += f", removed {removed} stale file(s)"
+        summary += f", removed {removed} stale file{plural(removed)}"
     logger.info(summary)
 
     return set(written_paths.keys())

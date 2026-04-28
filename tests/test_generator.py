@@ -158,7 +158,7 @@ def test_generate_manifests_summarizes_chart_cache(
             [config], tmp_path / "out", repo_root=tmp_path, charts_dir=charts_dir
         )
 
-    assert "Chart cache: 1 hit(s), 0 miss(es)" in caplog.text
+    assert "Chart cache: 1 hit, 0 misses" in caplog.text
 
 
 def test_strip_helm_metadata_removes_helm_labels() -> None:

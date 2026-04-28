@@ -9,7 +9,12 @@ import click
 
 from manifest_builder import __version__
 from manifest_builder.config import load_configs, load_images, resolve_configs
-from manifest_builder.generator import ManifestError, generate_manifests, setup_logging
+from manifest_builder.generator import (
+    ManifestError,
+    generate_manifests,
+    plural,
+    setup_logging,
+)
 from manifest_builder.git_utils import (
     create_manifest_commit,
     get_manifest_diff,
@@ -99,16 +104,17 @@ def main(
         helmfile_path = config_dir / "releases.yaml"
         helmfile_data = load_helmfile(helmfile_path) if helmfile_path.exists() else None
         if verbose and helmfile_data is not None:
-            click.echo(
-                f"Loaded releases.yaml: {len(helmfile_data.releases)} release(s)"
-            )
+            count = len(helmfile_data.releases)
+            click.echo(f"Loaded releases.yaml: {count} release{plural(count)}")
 
         # Load and resolve the configurations
         configs = load_configs(config_dir)
         configs = resolve_configs(configs, helmfile_data)
 
         if verbose:
-            click.echo(f"Loaded {len(configs)} chart configuration(s)")
+            click.echo(
+                f"Loaded {len(configs)} chart configuration{plural(len(configs))}"
+            )
 
         # Load container image definitions
         images = load_images(config_dir)
