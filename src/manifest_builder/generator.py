@@ -14,7 +14,7 @@ from pystache.common import MissingTags
 
 from manifest_builder.config import (
     ChartConfig,
-    SimpleConfig,
+    CopyConfig,
     TemplateValue,
     WebsiteConfig,
     validate_config,
@@ -298,7 +298,7 @@ def _render_values_files(
 
 
 def generate_manifests(
-    configs: list[ChartConfig | WebsiteConfig | SimpleConfig],
+    configs: list[ChartConfig | WebsiteConfig | CopyConfig],
     output_dir: Path,
     repo_root: Path,
     images: dict[str, str] | None = None,
@@ -360,13 +360,13 @@ def generate_manifests(
                 paths = generate_website(
                     config, output_dir, images=images, verbose=verbose
                 )
-            elif isinstance(config, SimpleConfig):
+            elif isinstance(config, CopyConfig):
                 logger.info(
                     f"Generating manifest for {config.name} ({config.namespace})"
                 )
-                from manifest_builder.simple import generate_simple
+                from manifest_builder.copy import generate_copy
 
-                paths = generate_simple(config, output_dir, images=images)
+                paths = generate_copy(config, output_dir, images=images)
             else:
                 paths = _generate_helm_manifests(
                     config,

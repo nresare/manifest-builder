@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: The manifest-builder contributors
-"""Tests for simple manifest generation."""
+"""Tests for copy manifest generation."""
 
 from pathlib import Path
 
@@ -9,21 +9,21 @@ import pystache.context
 import pytest
 import yaml
 
-from manifest_builder.config import SimpleConfig
-from manifest_builder.simple import generate_simple
+from manifest_builder.config import CopyConfig
+from manifest_builder.copy import generate_copy
 
 
 def _make_config(
     tmp_path: Path,
-    copy_from: Path,
+    source: Path,
     config: dict[str, Path] | None = None,
     name: str = "acme-dns",
     namespace: str = "acme-dns",
-) -> SimpleConfig:
-    return SimpleConfig(
+) -> CopyConfig:
+    return CopyConfig(
         name=name,
         namespace=namespace,
-        copy_from=copy_from,
+        source=source,
         config=config,
     )
 
@@ -37,8 +37,8 @@ def _read_yaml(path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_generate_simple_copies_manifests(tmp_path: Path) -> None:
-    """YAML files in copy-from directory are written to output."""
+def test_generate_copy_copies_manifests(tmp_path: Path) -> None:
+    """YAML files in the source directory are written to output."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
     (manifests_dir / "deployment.yaml").write_text(
@@ -55,7 +55,7 @@ spec:
 
     output_dir = tmp_path / "output"
     config = _make_config(tmp_path, manifests_dir)
-    paths = generate_simple(config, output_dir)
+    paths = generate_copy(config, output_dir)
 
     assert len(paths) == 1
     out = _read_yaml(next(iter(paths)))
@@ -63,7 +63,7 @@ spec:
     assert out["metadata"]["name"] == "acme-dns"
 
 
-def test_generate_simple_injects_namespace_when_missing(tmp_path: Path) -> None:
+def test_generate_copy_injects_namespace_when_missing(tmp_path: Path) -> None:
     """Namespaced resources without a namespace get the configured namespace."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -81,7 +81,7 @@ spec:
 
     output_dir = tmp_path / "output"
     config = _make_config(tmp_path, manifests_dir)
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     out_file = output_dir / "acme-dns" / "service-acme-dns.yaml"
     assert out_file.exists()
@@ -89,7 +89,7 @@ spec:
     assert out["metadata"]["namespace"] == "acme-dns"
 
 
-def test_generate_simple_preserves_existing_namespace(tmp_path: Path) -> None:
+def test_generate_copy_preserves_existing_namespace(tmp_path: Path) -> None:
     """Resources that already have a namespace are not modified."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -108,7 +108,7 @@ spec:
 
     output_dir = tmp_path / "output"
     config = _make_config(tmp_path, manifests_dir)
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     out_file = output_dir / "other-ns" / "service-my-svc.yaml"
     assert out_file.exists()
@@ -116,7 +116,7 @@ spec:
     assert out["metadata"]["namespace"] == "other-ns"
 
 
-def test_generate_simple_cluster_scoped_resources_no_namespace(tmp_path: Path) -> None:
+def test_generate_copy_cluster_scoped_resources_no_namespace(tmp_path: Path) -> None:
     """Cluster-scoped resources (e.g. ClusterRole) do not get a namespace."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -132,7 +132,7 @@ rules: []
 
     output_dir = tmp_path / "output"
     config = _make_config(tmp_path, manifests_dir)
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     out_file = output_dir / "cluster" / "clusterrole-acme-dns-role.yaml"
     assert out_file.exists()
@@ -145,7 +145,7 @@ rules: []
 # ---------------------------------------------------------------------------
 
 
-def test_generate_simple_creates_configmap_from_config(tmp_path: Path) -> None:
+def test_generate_copy_creates_configmap_from_config(tmp_path: Path) -> None:
     """A ConfigMap is created from the files listed in the config table."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -158,7 +158,7 @@ def test_generate_simple_creates_configmap_from_config(tmp_path: Path) -> None:
         manifests_dir,
         config={"/config/app.cfg": cfg_file},
     )
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     cm_file = output_dir / "acme-dns" / "configmap-acme-dns-config.yaml"
     assert cm_file.exists()
@@ -170,7 +170,7 @@ def test_generate_simple_creates_configmap_from_config(tmp_path: Path) -> None:
     assert cm["data"]["app.cfg"] == "[dns]\nport = 53\n"
 
 
-def test_generate_simple_configmap_key_is_filename(tmp_path: Path) -> None:
+def test_generate_copy_configmap_key_is_filename(tmp_path: Path) -> None:
     """The ConfigMap key is the last component of the container path."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -183,14 +183,14 @@ def test_generate_simple_configmap_key_is_filename(tmp_path: Path) -> None:
         manifests_dir,
         config={"/config/config.cfg": cfg_file},
     )
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     cm_file = output_dir / "acme-dns" / "configmap-acme-dns-config.yaml"
     cm = _read_yaml(cm_file)
     assert "config.cfg" in cm["data"]
 
 
-def test_generate_simple_injects_config_volume_and_mount(tmp_path: Path) -> None:
+def test_generate_copy_injects_config_volume_and_mount(tmp_path: Path) -> None:
     """Deployment containers should mount generated ConfigMaps."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -217,7 +217,7 @@ spec:
         manifests_dir,
         config={"/config/app.cfg": cfg_file},
     )
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     deployment = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
     pod_spec = deployment["spec"]["template"]["spec"]
@@ -233,7 +233,7 @@ spec:
     )
 
 
-def test_generate_simple_mounts_nested_config_at_parent_directory(
+def test_generate_copy_mounts_nested_config_at_parent_directory(
     tmp_path: Path,
 ) -> None:
     """Nested config paths should mount at their full parent directory."""
@@ -262,7 +262,7 @@ spec:
         manifests_dir,
         config={"/etc/acme-dns/config.cfg": cfg_file},
     )
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     deployment = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
     pod_spec = deployment["spec"]["template"]["spec"]
@@ -284,7 +284,7 @@ spec:
     )
 
 
-def test_generate_simple_adds_config_checksum_annotation(tmp_path: Path) -> None:
+def test_generate_copy_adds_config_checksum_annotation(tmp_path: Path) -> None:
     """Deployment pod template should include a config checksum annotation."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -314,7 +314,7 @@ spec:
         manifests_dir,
         config={"/config/app.cfg": cfg_file},
     )
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
 
     deployment = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
     annotations = deployment["spec"]["template"]["metadata"]["annotations"]
@@ -323,7 +323,7 @@ spec:
     assert len(annotations["checksum/config"]) == 64
 
 
-def test_generate_simple_config_checksum_changes_with_content(tmp_path: Path) -> None:
+def test_generate_copy_config_checksum_changes_with_content(tmp_path: Path) -> None:
     """Changing config content should produce a different checksum annotation."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -350,14 +350,14 @@ spec:
         manifests_dir,
         config={"/config/app.cfg": cfg_file},
     )
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
     first = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
     first_checksum = first["spec"]["template"]["metadata"]["annotations"][
         "checksum/config"
     ]
 
     cfg_file.write_text("[dns]\nport = 54\n")
-    generate_simple(config, output_dir)
+    generate_copy(config, output_dir)
     second = _read_yaml(output_dir / "acme-dns" / "deployment-acme-dns.yaml")
     second_checksum = second["spec"]["template"]["metadata"]["annotations"][
         "checksum/config"
@@ -366,7 +366,7 @@ spec:
     assert first_checksum != second_checksum
 
 
-def test_generate_simple_no_config_no_configmap(tmp_path: Path) -> None:
+def test_generate_copy_no_config_no_configmap(tmp_path: Path) -> None:
     """When no config is specified, no ConfigMap is created."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -385,7 +385,7 @@ spec:
 
     output_dir = tmp_path / "output"
     config = _make_config(tmp_path, manifests_dir)
-    paths = generate_simple(config, output_dir)
+    paths = generate_copy(config, output_dir)
 
     configmaps = [p for p in paths if "configmap" in p.name]
     assert configmaps == []
@@ -396,7 +396,7 @@ spec:
 # ---------------------------------------------------------------------------
 
 
-def test_generate_simple_with_images_renders_template(tmp_path: Path) -> None:
+def test_generate_copy_with_images_renders_template(tmp_path: Path) -> None:
     """Manifests are rendered as Mustache templates when images are provided."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -418,7 +418,7 @@ spec:
     output_dir = tmp_path / "output"
     config = _make_config(tmp_path, manifests_dir, name="my-app", namespace="default")
     images = {"my_app_image": "example.com/my-app:1.2.3"}
-    paths = generate_simple(config, output_dir, images=images)
+    paths = generate_copy(config, output_dir, images=images)
 
     assert len(paths) == 1
     out = _read_yaml(next(iter(paths)))
@@ -426,7 +426,7 @@ spec:
     assert container["image"] == "example.com/my-app:1.2.3"
 
 
-def test_generate_simple_raises_on_missing_image(tmp_path: Path) -> None:
+def test_generate_copy_raises_on_missing_image(tmp_path: Path) -> None:
     """Manifest generation fails if a template variable is missing from images."""
     manifests_dir = tmp_path / "manifests"
     manifests_dir.mkdir()
@@ -449,4 +449,4 @@ spec:
     config = _make_config(tmp_path, manifests_dir, name="my-app", namespace="default")
 
     with pytest.raises(pystache.context.KeyNotFoundError):
-        generate_simple(config, output_dir, images=None)
+        generate_copy(config, output_dir, images=None)
