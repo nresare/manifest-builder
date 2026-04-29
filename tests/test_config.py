@@ -205,10 +205,10 @@ def test_load_configs_missing_directory(tmp_path: Path) -> None:
         load_configs(tmp_path / "nonexistent")
 
 
-def test_load_configs_no_toml_files(tmp_path: Path) -> None:
+def test_load_configs_missing_config_toml(tmp_path: Path) -> None:
     conf = tmp_path / "conf"
     conf.mkdir()
-    with pytest.raises(FileNotFoundError, match="No TOML files found"):
+    with pytest.raises(FileNotFoundError, match="Configuration file not found"):
         load_configs(conf)
 
 
@@ -278,12 +278,13 @@ def test_load_configs_neither_release_nor_chart_raises(tmp_path: Path) -> None:
         load_configs(conf)
 
 
-def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
+def test_load_configs_uses_only_config_toml(tmp_path: Path) -> None:
+    """Sibling TOML files are reserved for other semantics and not parsed here."""
     conf = tmp_path / "conf"
     conf.mkdir()
     write_toml(
         conf,
-        "a.toml",
+        "config.toml",
         """\
         [[helm]]
         namespace = "ns-a"
@@ -293,7 +294,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
     )
     write_toml(
         conf,
-        "b.toml",
+        "other.toml",
         """\
         [[helm]]
         namespace = "ns-b"
@@ -304,7 +305,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
 
     configs = load_configs(conf)
     names = {c.name for c in configs.all_configs()}
-    assert names == {"app-a", "app-b"}
+    assert names == {"app-a"}
 
 
 def test_load_configs_mixed_helms_and_websites(tmp_path: Path) -> None:
