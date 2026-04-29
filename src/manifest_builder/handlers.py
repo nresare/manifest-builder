@@ -6,9 +6,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from manifest_builder.config import ManifestConfig, ManifestConfigs
 from manifest_builder.helm import ChartCacheStats
+
+if TYPE_CHECKING:
+    from manifest_builder.config import ManifestConfig
+    from manifest_builder.helmfile import Helmfile
 
 
 @dataclass(frozen=True)
@@ -27,17 +31,33 @@ class ConfigHandler(ABC):
     """Base class for config-type-specific manifest generation."""
 
     @abstractmethod
-    def iter_configs(self, configs: ManifestConfigs) -> Iterable[ManifestConfig]:
-        """Yield the configs this handler is responsible for."""
+    def top_level_config_name(self) -> str:
+        """Return the top-level TOML key this handler owns."""
 
     @abstractmethod
-    def validate(self, config: ManifestConfig, repo_root: Path) -> None:
+    def load_config(
+        self,
+        data: object,
+        source_file: Path,
+        root_config: dict[str, Any],
+    ) -> None:
+        """Parse this handler's raw TOML subtree."""
+
+    @abstractmethod
+    def iter_configs(self) -> Iterable["ManifestConfig"]:
+        """Yield the parsed configs this handler is responsible for."""
+
+    def resolve(self, helmfile: "Helmfile | None") -> None:
+        """Resolve references after all handlers have parsed their configs."""
+
+    @abstractmethod
+    def validate(self, config: "ManifestConfig", repo_root: Path) -> None:
         """Validate a config before any manifests are generated."""
 
     @abstractmethod
     def generate(
         self,
-        config: ManifestConfig,
+        config: "ManifestConfig",
         context: GenerationContext,
     ) -> set[Path]:
         """Generate manifests for a config and return paths that were written."""

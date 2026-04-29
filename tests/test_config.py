@@ -20,7 +20,10 @@ from manifest_builder.config import (
     resolve_configs,
     validate_config,
 )
+from manifest_builder.copy import CopyConfigHandler
+from manifest_builder.generator import HelmConfigHandler
 from manifest_builder.helmfile import Helmfile, HelmfileRelease, HelmfileRepository
+from manifest_builder.website import WebsiteConfigHandler
 
 
 def write_toml(directory: Path, name: str, content: str) -> Path:
@@ -32,6 +35,31 @@ def write_toml(directory: Path, name: str, content: str) -> Path:
 def only_config(configs: ManifestConfigs) -> ManifestConfig:
     (config,) = configs.all_configs()
     return config
+
+
+def config_handlers() -> list[
+    HelmConfigHandler | WebsiteConfigHandler | CopyConfigHandler
+]:
+    return [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
+
+
+def load_test_configs(config_dir: Path) -> ManifestConfigs:
+    return load_configs(config_dir, config_handlers())
+
+
+def manifest_configs(
+    *,
+    helm: list[ChartConfig] | None = None,
+    websites: list[WebsiteConfig] | None = None,
+    copies: list[CopyConfig] | None = None,
+) -> ManifestConfigs:
+    return ManifestConfigs(
+        handlers=[
+            HelmConfigHandler(helm),
+            WebsiteConfigHandler(websites),
+            CopyConfigHandler(copies),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +83,7 @@ def test_values_resolved_relative_to_config_dir(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
@@ -82,8 +110,8 @@ def test_values_resolved_relative_to_custom_config_dir(tmp_path: Path) -> None:
             """,
         )
 
-    configs_a = load_configs(conf_a)
-    configs_b = load_configs(conf_b)
+    configs_a = load_test_configs(conf_a)
+    configs_b = load_test_configs(conf_b)
 
     config_a = only_config(configs_a)
     config_b = only_config(configs_b)
@@ -108,7 +136,7 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.values == []
@@ -135,7 +163,7 @@ def test_variables_are_loaded_for_helm_configs(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
@@ -202,14 +230,14 @@ def test_validate_config_missing_local_chart(tmp_path: Path) -> None:
 
 def test_load_configs_missing_directory(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        load_configs(tmp_path / "nonexistent")
+        load_test_configs(tmp_path / "nonexistent")
 
 
 def test_load_configs_missing_config_toml(tmp_path: Path) -> None:
     conf = tmp_path / "conf"
     conf.mkdir()
     with pytest.raises(FileNotFoundError, match="Configuration file not found"):
-        load_configs(conf)
+        load_test_configs(conf)
 
 
 def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
@@ -223,8 +251,44 @@ def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
         description = "this file has no [[helm]], [[website]], or [[copy]]"
         """,
     )
-    with pytest.raises(ValueError, match="No \\[\\[helm\\]\\].*\\[\\[copy\\]\\]"):
-        load_configs(conf)
+    with pytest.raises(ValueError, match="No .*\\[\\[helm\\]\\].* entries found"):
+        load_test_configs(conf)
+
+
+def test_load_configs_no_registered_handler_tables(tmp_path: Path) -> None:
+    """Config loading fails when none of the registered handler lists is present."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        """,
+    )
+    with pytest.raises(ValueError, match="No \\[\\[website\\]\\] entries found"):
+        load_configs(conf, [WebsiteConfigHandler()])
+
+
+def test_load_configs_without_handlers_raises(tmp_path: Path) -> None:
+    """Config loading needs at least one handler to define known config lists."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        """,
+    )
+    with pytest.raises(ValueError, match="No config handlers registered"):
+        load_configs(conf, [])
 
 
 def test_load_configs_simple_table_is_not_recognized(tmp_path: Path) -> None:
@@ -240,8 +304,8 @@ def test_load_configs_simple_table_is_not_recognized(tmp_path: Path) -> None:
         source = "manifests"
         """,
     )
-    with pytest.raises(ValueError, match="No \\[\\[helm\\]\\].*\\[\\[copy\\]\\]"):
-        load_configs(conf)
+    with pytest.raises(ValueError, match="No .*\\[\\[helm\\]\\].* entries found"):
+        load_test_configs(conf)
 
 
 def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:
@@ -259,7 +323,7 @@ def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:
         """,
     )
     with pytest.raises(ValueError, match="Cannot specify both"):
-        load_configs(conf)
+        load_test_configs(conf)
 
 
 def test_load_configs_neither_release_nor_chart_raises(tmp_path: Path) -> None:
@@ -275,7 +339,7 @@ def test_load_configs_neither_release_nor_chart_raises(tmp_path: Path) -> None:
         """,
     )
     with pytest.raises(ValueError, match="Must specify either"):
-        load_configs(conf)
+        load_test_configs(conf)
 
 
 def test_load_configs_uses_only_config_toml(tmp_path: Path) -> None:
@@ -303,7 +367,7 @@ def test_load_configs_uses_only_config_toml(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf)
+    configs = load_test_configs(conf)
     names = {c.name for c in configs.all_configs()}
     assert names == {"app-a"}
 
@@ -326,12 +390,11 @@ def test_load_configs_mixed_helms_and_websites(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf)
+    configs = load_test_configs(conf)
     assert len(configs) == 2
-    assert len(configs.helm) == 1
-    assert len(configs.websites) == 1
-    assert isinstance(configs.helm[0], ChartConfig)
-    assert isinstance(configs.websites[0], WebsiteConfig)
+    parsed = configs.all_configs()
+    assert sum(isinstance(config, ChartConfig) for config in parsed) == 1
+    assert sum(isinstance(config, WebsiteConfig) for config in parsed) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +428,9 @@ def test_resolve_configs_fills_in_chart_and_repo(tmp_path: Path) -> None:
         values=[],
         release="myapp",
     )
-    resolved = resolve_configs(ManifestConfigs(helm=[config]), _make_helmfile())
+    resolved = resolve_configs(manifest_configs(helm=[config]), _make_helmfile())
     assert len(resolved) == 1
-    resolved_config = resolved.helm[0]
+    resolved_config = only_config(resolved)
     assert isinstance(resolved_config, ChartConfig)
     assert resolved_config.chart == "myapp"
     assert resolved_config.repo == "https://charts.example.com"
@@ -387,7 +450,7 @@ def test_resolve_configs_no_helmfile_raises_when_release_present(
         release="myapp",
     )
     with pytest.raises(ValueError, match="no releases.yaml was found"):
-        resolve_configs(ManifestConfigs(helm=[config]), None)
+        resolve_configs(manifest_configs(helm=[config]), None)
 
 
 def test_resolve_configs_unknown_release_raises() -> None:
@@ -401,7 +464,7 @@ def test_resolve_configs_unknown_release_raises() -> None:
         release="unknown",
     )
     with pytest.raises(ValueError, match="not found in releases.yaml"):
-        resolve_configs(ManifestConfigs(helm=[config]), _make_helmfile())
+        resolve_configs(manifest_configs(helm=[config]), _make_helmfile())
 
 
 def test_resolve_configs_oci_repository() -> None:
@@ -432,9 +495,9 @@ def test_resolve_configs_oci_repository() -> None:
         values=[],
         release="envoy-gateway",
     )
-    resolved = resolve_configs(ManifestConfigs(helm=[config]), helmfile)
+    resolved = resolve_configs(manifest_configs(helm=[config]), helmfile)
     assert len(resolved) == 1
-    resolved_config = resolved.helm[0]
+    resolved_config = only_config(resolved)
     assert isinstance(resolved_config, ChartConfig)
     assert resolved_config.chart == "oci://docker.io/envoyproxy/gateway-helm"
     assert resolved_config.repo is None
@@ -459,7 +522,7 @@ def test_load_website_config(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
@@ -479,7 +542,7 @@ def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
         """,
     )
     with pytest.raises(ValueError, match="Missing required field 'name'"):
-        load_configs(conf_dir)
+        load_test_configs(conf_dir)
 
 
 def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
@@ -496,7 +559,7 @@ def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
@@ -517,7 +580,7 @@ def test_load_website_config_with_image(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
@@ -538,7 +601,7 @@ def test_load_website_config_with_args_string(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
@@ -559,7 +622,7 @@ def test_load_website_config_with_args_list(tmp_path: Path) -> None:
         """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
@@ -584,7 +647,7 @@ def test_load_website_config_hugo_repo_and_image_mutually_exclusive(
     )
 
     with pytest.raises(ValueError, match="Cannot specify both 'hugo-repo' and 'image'"):
-        load_configs(conf_dir)
+        load_test_configs(conf_dir)
 
 
 def test_resolve_configs_passes_website_config_through() -> None:
@@ -592,8 +655,8 @@ def test_resolve_configs_passes_website_config_through() -> None:
         name="my-website",
         namespace="default",
     )
-    resolved = resolve_configs(ManifestConfigs(websites=[config]), None)
-    assert resolved.websites == [config]
+    resolved = resolve_configs(manifest_configs(websites=[config]), None)
+    assert resolved.all_configs() == (config,)
 
 
 def test_resolve_configs_passthrough_for_direct_chart() -> None:
@@ -607,8 +670,8 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
         release=None,
         extra_resources=None,
     )
-    resolved = resolve_configs(ManifestConfigs(helm=[config]), None)
-    assert resolved.helm == [config]
+    resolved = resolve_configs(manifest_configs(helm=[config]), None)
+    assert resolved.all_configs() == (config,)
 
 
 def test_load_website_config_with_config(tmp_path: Path) -> None:
@@ -631,7 +694,7 @@ config = { "/config/app.conf" = "app.conf" }
 """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
@@ -659,7 +722,7 @@ config = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
 """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.config is not None
@@ -692,7 +755,7 @@ extra-hostnames = "www.example.com"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.extra_hostnames == "www.example.com"
@@ -711,7 +774,7 @@ extra-hostnames = ["www.example.com", "example.cdn.com"]
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.extra_hostnames == ["www.example.com", "example.cdn.com"]
@@ -731,7 +794,7 @@ external-secrets = ["/email-password", "/db/credentials"]
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.external_secrets == ["/email-password", "/db/credentials"]
@@ -751,7 +814,7 @@ external-secrets = "/api-key"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.external_secrets == ["/api-key"]
@@ -771,7 +834,7 @@ custom-token-audience = "vault"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.custom_token_audience == "vault"
@@ -791,7 +854,7 @@ replicas = 5
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.replicas == 5
@@ -811,7 +874,7 @@ replicas = 1
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.replicas == 1
@@ -830,7 +893,7 @@ image = "nginx:latest"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.replicas == DEFAULT_REPLICA_COUNT
@@ -855,7 +918,7 @@ extra-resources = "resources"
 """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.extra_resources == resources_dir
@@ -917,7 +980,7 @@ init = "setup.sh"
 """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.init == script_file
@@ -962,7 +1025,7 @@ source = "manifests"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     assert len(configs) == 1
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
@@ -984,7 +1047,7 @@ source = "manifests"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.name == "acme-dns"
@@ -1004,7 +1067,7 @@ source = "manifests"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.name == "my-app"
@@ -1021,7 +1084,7 @@ source = "manifests"
 """,
     )
     with pytest.raises(ValueError, match="Missing required field 'namespace'"):
-        load_configs(tmp_path)
+        load_test_configs(tmp_path)
 
 
 def test_load_copy_config_missing_source(tmp_path: Path) -> None:
@@ -1035,7 +1098,7 @@ namespace = "acme-dns"
 """,
     )
     with pytest.raises(ValueError, match="Missing required field 'source'"):
-        load_configs(tmp_path)
+        load_test_configs(tmp_path)
 
 
 def test_load_copy_config_source_resolved_relative_to_toml(
@@ -1055,7 +1118,7 @@ source = "manifests"
 """,
     )
 
-    configs = load_configs(conf_dir)
+    configs = load_test_configs(conf_dir)
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.source == conf_dir / "manifests"
@@ -1077,7 +1140,7 @@ source = "manifests"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.config is not None
@@ -1101,7 +1164,7 @@ source = "manifests"
 """,
     )
 
-    configs = load_configs(tmp_path)
+    configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.config is not None

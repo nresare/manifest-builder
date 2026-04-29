@@ -116,7 +116,8 @@ def main(
             click.echo(f"Loaded releases.yaml: {count} release{plural(count)}")
 
         # Load and resolve the configurations
-        configs = load_configs(config_dir)
+        handlers = [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
+        configs = load_configs(config_dir, handlers)
         configs = resolve_configs(configs, helmfile_data)
 
         if verbose:
@@ -146,12 +147,10 @@ def main(
             )
 
         # Generate manifests
-        handlers = [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
         written_paths = generate_manifests(
             configs=configs,
             output_dir=output_dir,
             repo_root=repo_root,
-            handlers=handlers,
             images=images,
             verbose=verbose,
             owned_namespaces=owned_namespaces,

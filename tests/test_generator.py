@@ -156,10 +156,9 @@ def test_generate_manifests_summarizes_chart_cache(
         "manifest_builder.generator.run_helm_template", return_value=NAMESPACED_YAML
     ):
         generate_manifests(
-            ManifestConfigs(helm=[config]),
+            ManifestConfigs(handlers=[HelmConfigHandler([config])]),
             tmp_path / "out",
             repo_root=tmp_path,
-            handlers=[HelmConfigHandler()],
             charts_dir=charts_dir,
         )
 
@@ -181,10 +180,9 @@ def test_generate_manifests_rejects_config_in_owned_namespace(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="owned by another service"):
         generate_manifests(
-            ManifestConfigs(helm=[config]),
+            ManifestConfigs(handlers=[HelmConfigHandler([config])]),
             tmp_path / "out",
             repo_root=tmp_path,
-            handlers=[HelmConfigHandler()],
             owned_namespaces={"team-a"},
         )
 
@@ -212,10 +210,9 @@ def test_generate_manifests_preserves_files_in_owned_namespace(tmp_path: Path) -
         "manifest_builder.generator.run_helm_template", return_value=NAMESPACED_YAML
     ):
         written = generate_manifests(
-            ManifestConfigs(helm=[config]),
+            ManifestConfigs(handlers=[HelmConfigHandler([config])]),
             output_dir,
             repo_root=tmp_path,
-            handlers=[HelmConfigHandler()],
             charts_dir=tmp_path / "charts",
             owned_namespaces={"team-a"},
         )
@@ -253,10 +250,9 @@ data: {}
     ):
         with pytest.raises(ValueError, match="owned by another service"):
             generate_manifests(
-                ManifestConfigs(helm=[config]),
+                ManifestConfigs(handlers=[HelmConfigHandler([config])]),
                 tmp_path / "out",
                 repo_root=tmp_path,
-                handlers=[HelmConfigHandler()],
                 charts_dir=tmp_path / "charts",
                 owned_namespaces={"team-a"},
             )

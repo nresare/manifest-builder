@@ -5,8 +5,14 @@
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from manifest_builder.helmfile import Helmfile
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from manifest_builder.handlers import ConfigHandler
 
 DEFAULT_REPLICA_COUNT = 2
 TemplateValue = str | int | float | bool
@@ -65,18 +71,18 @@ type ManifestConfig = ChartConfig | WebsiteConfig | CopyConfig
 
 @dataclass
 class ManifestConfigs:
-    """Application configs grouped by the generator that owns them."""
+    """Application config handlers loaded from config.toml."""
 
-    helm: list[ChartConfig] = field(default_factory=list)
-    websites: list[WebsiteConfig] = field(default_factory=list)
-    copies: list[CopyConfig] = field(default_factory=list)
+    handlers: "Sequence[ConfigHandler]"
 
     def __len__(self) -> int:
-        return len(self.helm) + len(self.websites) + len(self.copies)
+        return len(self.all_configs())
 
     def all_configs(self) -> tuple[ManifestConfig, ...]:
-        """Return all configs for generic bookkeeping such as handler coverage."""
-        return (*self.helm, *self.websites, *self.copies)
+        """Return all configs for generic bookkeeping."""
+        return tuple(
+            config for handler in self.handlers for config in handler.iter_configs()
+        )
 
 
 def load_images(config_dir: Path) -> dict[str, str]:
@@ -166,12 +172,14 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
     return owned
 
 
-def load_configs(config_dir: Path) -> ManifestConfigs:
+def load_configs(
+    config_dir: Path, handlers: "Sequence[ConfigHandler]"
+) -> ManifestConfigs:
     """
     Load app configurations from config.toml in the config directory.
 
-    The config.toml file may contain a [variables] table and [[helm]], [[website]],
-    and [[copy]] tables.
+    The config.toml file may contain top-level tables owned by the supplied
+    config handlers.
 
     Args:
         config_dir: Directory containing TOML configuration files
@@ -196,180 +204,24 @@ def load_configs(config_dir: Path) -> ManifestConfigs:
     with open(toml_file, "rb") as f:
         data = tomllib.load(f)
 
-    if "helm" not in data and "website" not in data and "copy" not in data:
-        raise ValueError(
-            f"No [[helm]], [[website]], or [[copy]] entries found in {toml_file}"
-        )
+    handler_by_name: dict[str, ConfigHandler] = {}
+    for handler in handlers:
+        name = handler.top_level_config_name()
+        if name in handler_by_name:
+            raise ValueError(f"Duplicate config handler for top-level key '{name}'")
+        handler_by_name[name] = handler
+    if not handler_by_name:
+        raise ValueError("No config handlers registered")
 
-    variables = _parse_variables(data.get("variables"), toml_file)
+    present_handler_names = sorted(name for name in handler_by_name if name in data)
+    if not present_handler_names:
+        expected = ", ".join(f"[[{name}]]" for name in sorted(handler_by_name))
+        raise ValueError(f"No {expected} entries found in {toml_file}")
 
-    configs = ManifestConfigs()
-    for helm_data in data.get("helm", []):
-        configs.helm.append(_parse_chart_config(helm_data, toml_file, variables))
+    for name in present_handler_names:
+        handler_by_name[name].load_config(data[name], toml_file, data)
 
-    for website_data in data.get("website", []):
-        configs.websites.append(_parse_website_config(website_data, toml_file))
-
-    for copy_data in data.get("copy", []):
-        configs.copies.append(_parse_copy_config(copy_data, toml_file))
-
-    return configs
-
-
-def _parse_chart_config(
-    data: dict, source_file: Path, variables: dict[str, TemplateValue]
-) -> ChartConfig:
-    """Parse a single Helm chart configuration from TOML data."""
-    has_release = "release" in data
-    has_chart = "chart" in data
-
-    if has_release and has_chart:
-        raise ValueError(f"Cannot specify both 'release' and 'chart' in {source_file}")
-    if not has_release and not has_chart:
-        raise ValueError(f"Must specify either 'release' or 'chart' in {source_file}")
-    if "namespace" not in data:
-        raise ValueError(f"Missing required field 'namespace' in {source_file}")
-
-    config_dir = source_file.parent
-    values = [config_dir / v for v in data.get("values", [])]
-
-    # Parse extra_resources: resolve path relative to the TOML file's directory
-    extra_resources = None
-    if "extra-resources" in data:
-        extra_resources = config_dir / data["extra-resources"]
-
-    # Parse init: resolve path relative to the TOML file's directory
-    init = None
-    if "init" in data:
-        init = config_dir / data["init"]
-
-    if has_release:
-        return ChartConfig(
-            name=data["release"],
-            namespace=data["namespace"],
-            chart=None,
-            repo=None,
-            version=None,
-            values=values,
-            variables=variables.copy(),
-            release=data["release"],
-            extra_resources=extra_resources,
-            init=init,
-        )
-    else:
-        if "name" not in data:
-            raise ValueError(f"Missing required field 'name' in {source_file}")
-        return ChartConfig(
-            name=data["name"],
-            namespace=data["namespace"],
-            chart=data["chart"],
-            repo=data.get("repo"),
-            version=data.get("version"),
-            values=values,
-            variables=variables.copy(),
-            release=None,
-            extra_resources=extra_resources,
-            init=init,
-        )
-
-
-def _parse_variables(
-    data: dict[str, object] | None, source_file: Path
-) -> dict[str, TemplateValue]:
-    """Parse top-level variables for values file templating."""
-    if data is None:
-        return {}
-
-    if not isinstance(data, dict):
-        raise ValueError(f"'variables' must be a table in {source_file}")
-
-    variables: dict[str, TemplateValue] = {}
-    for key, value in data.items():
-        if not isinstance(value, str | int | float | bool):
-            raise ValueError(
-                f"Variable '{key}' in {source_file} must be a string, number, or boolean"
-            )
-        variables[key] = value
-
-    return variables
-
-
-def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
-    """Parse a website app configuration from TOML data."""
-    for required_field in ("name", "namespace"):
-        if required_field not in data:
-            raise ValueError(
-                f"Missing required field '{required_field}' in {source_file}"
-            )
-
-    hugo_repo = data.get("hugo-repo")
-    image = data.get("image")
-
-    if hugo_repo and image:
-        raise ValueError(
-            f"Cannot specify both 'hugo-repo' and 'image' in {source_file}"
-        )
-
-    # Parse config: resolve local paths relative to the TOML file's directory
-    config_dir = source_file.parent
-    config_dict = None
-    if "config" in data:
-        config_dict = {
-            container_path: config_dir / local_path
-            for container_path, local_path in data["config"].items()
-        }
-
-    # Parse external_secrets: normalize to list
-    external_secrets = data.get("external-secrets")
-    if external_secrets is not None and isinstance(external_secrets, str):
-        external_secrets = [external_secrets]
-
-    return WebsiteConfig(
-        name=data["name"],
-        namespace=data["namespace"],
-        hugo_repo=hugo_repo,
-        image=image,
-        args=data.get("args"),
-        config=config_dict,
-        extra_hostnames=data.get("extra-hostnames"),
-        external_secrets=external_secrets,
-        custom_token_audience=data.get("custom-token-audience"),
-        replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
-    )
-
-
-def _parse_copy_config(data: dict, source_file: Path) -> CopyConfig:
-    """Parse a copy app configuration from TOML data."""
-    for required_field in ("namespace", "source"):
-        if required_field not in data:
-            raise ValueError(
-                f"Missing required field '{required_field}' in {source_file}"
-            )
-
-    config_dir = source_file.parent
-    name = data.get("name", data["namespace"])
-    source = config_dir / data["source"]
-
-    config_dict = None
-    config_data = data.get("config")
-    if config_data is not None:
-        # Support both [copy.config] (dict) and [[copy.config]] (list of dicts)
-        if isinstance(config_data, list):
-            merged: dict[str, str] = {}
-            for item in config_data:
-                merged.update(item)
-            config_data = merged
-        config_dict = {
-            container_path: config_dir / local_path
-            for container_path, local_path in config_data.items()
-        }
-
-    return CopyConfig(
-        name=name,
-        namespace=data["namespace"],
-        source=source,
-        config=config_dict,
-    )
+    return ManifestConfigs(handlers=handlers)
 
 
 def resolve_configs(
@@ -392,78 +244,9 @@ def resolve_configs(
     Raises:
         ValueError: If a release reference cannot be resolved
     """
-    if not any(c.release for c in configs.helm):
-        return configs
-
-    if helmfile is None:
-        names = [c.name for c in configs.helm if c.release]
-        raise ValueError(
-            f"Charts {names} reference helmfile releases but no releases.yaml was found"
-        )
-
-    repo_by_name = {
-        r.name: (f"oci://{r.url}" if r.oci else r.url) for r in helmfile.repositories
-    }
-    release_by_name = {r.name: r for r in helmfile.releases}
-
-    resolved_helm: list[ChartConfig] = []
-    for config in configs.helm:
-        if config.release is None:
-            resolved_helm.append(config)
-            continue
-
-        release_name = config.release
-        if release_name not in release_by_name:
-            raise ValueError(f"Release '{release_name}' not found in releases.yaml")
-
-        hf_release = release_by_name[release_name]
-
-        parts = hf_release.chart.split("/", 1)
-        if len(parts) != 2:
-            raise ValueError(
-                f"helmfile release '{release_name}' chart '{hf_release.chart}' "
-                "must be in 'reponame/chartname' format"
-            )
-        repo_name, chart_name = parts
-
-        if repo_name not in repo_by_name:
-            raise ValueError(
-                f"Repository '{repo_name}' referenced by release '{release_name}' "
-                "not found in releases.yaml repositories"
-            )
-
-        repo_url = repo_by_name[repo_name]
-
-        if repo_url.startswith("oci://"):
-            # Construct the full OCI URL
-            base_url = repo_url.rstrip("/")
-            full_oci_url = f"{base_url}/{chart_name}"
-            resolved_chart = full_oci_url
-            resolved_repo = None  # OCI doesn't use --repo
-        else:
-            resolved_chart = chart_name
-            resolved_repo = repo_url
-
-        resolved_helm.append(
-            ChartConfig(
-                name=config.name,
-                namespace=config.namespace,
-                chart=resolved_chart,
-                repo=resolved_repo,
-                version=hf_release.version,
-                values=config.values,
-                variables=config.variables,
-                release=config.release,
-                extra_resources=config.extra_resources,
-                init=config.init,
-            )
-        )
-
-    return ManifestConfigs(
-        helm=resolved_helm,
-        websites=list(configs.websites),
-        copies=list(configs.copies),
-    )
+    for handler in configs.handlers:
+        handler.resolve(helmfile)
+    return configs
 
 
 def validate_website_config(config: WebsiteConfig) -> None:
