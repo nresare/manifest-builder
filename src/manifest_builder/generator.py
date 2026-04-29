@@ -5,6 +5,8 @@
 import logging
 import tempfile
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +16,12 @@ from pystache.common import MissingTags
 
 from manifest_builder.config import (
     ChartConfig,
-    CopyConfig,
+    ManifestConfig,
+    ManifestConfigs,
     TemplateValue,
-    WebsiteConfig,
-    validate_config,
+    validate_chart_config,
 )
+from manifest_builder.handlers import ConfigHandler, GenerationContext
 from manifest_builder.helm import ChartCacheStats, pull_chart, run_helm_template
 
 logger = logging.getLogger(__name__)
@@ -38,6 +41,34 @@ class ManifestError(Exception):
         self.config_name = config_name
         self.cause = cause
         super().__init__(f"{type(cause).__name__}: {cause}")
+
+
+class HelmConfigHandler(ConfigHandler):
+    """Generate manifests for Helm chart configs."""
+
+    def iter_configs(self, configs: ManifestConfigs) -> Sequence[ManifestConfig]:
+        return configs.helm
+
+    def validate(self, config: ManifestConfig, repo_root: Path) -> None:
+        if not isinstance(config, ChartConfig):
+            raise TypeError(f"HelmConfigHandler cannot process {type(config).__name__}")
+        validate_chart_config(config, repo_root)
+
+    def generate(
+        self,
+        config: ManifestConfig,
+        context: GenerationContext,
+    ) -> set[Path]:
+        if not isinstance(config, ChartConfig):
+            raise TypeError(f"HelmConfigHandler cannot process {type(config).__name__}")
+        return _generate_helm_manifests(
+            config,
+            context.output_dir,
+            context.charts_dir,
+            context.verbose,
+            images=context.images,
+            cache_stats=context.cache_stats,
+        )
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -128,7 +159,6 @@ def _generate_helm_manifests(
     Returns:
         Set of paths written
     """
-    logger.info(f"Generating manifest for {config.name} ({config.namespace})")
     logger.debug(f"Chart: {config.chart}")
     if config.repo:
         logger.debug(f"Repo: {config.repo}")
@@ -297,10 +327,46 @@ def _render_values_files(
     return rendered_paths
 
 
+@dataclass(frozen=True)
+class _GenerationJob:
+    handler: ConfigHandler
+    config: ManifestConfig
+
+
+def _collect_generation_jobs(
+    configs: ManifestConfigs,
+    handlers: Sequence[ConfigHandler],
+) -> list[_GenerationJob]:
+    """Pair each loaded config with exactly one registered handler."""
+    all_configs = configs.all_configs()
+    seen_config_ids: set[int] = set()
+    jobs: list[_GenerationJob] = []
+
+    for handler in handlers:
+        for config in handler.iter_configs(configs):
+            config_id = id(config)
+            if config_id in seen_config_ids:
+                raise ValueError(
+                    f"Multiple config handlers selected '{config.name}' "
+                    f"({config.namespace})"
+                )
+            seen_config_ids.add(config_id)
+            jobs.append(_GenerationJob(handler=handler, config=config))
+
+    missing = [config for config in all_configs if id(config) not in seen_config_ids]
+    if missing:
+        details = ", ".join(f"{config.name} ({config.namespace})" for config in missing)
+        raise ValueError(f"No config handler registered for: {details}")
+
+    return jobs
+
+
 def generate_manifests(
-    configs: list[ChartConfig | WebsiteConfig | CopyConfig],
+    configs: ManifestConfigs,
     output_dir: Path,
     repo_root: Path,
+    *,
+    handlers: Sequence[ConfigHandler],
     images: dict[str, str] | None = None,
     charts_dir: Path | None = None,
     verbose: bool = False,
@@ -310,9 +376,10 @@ def generate_manifests(
     Generate manifests for all configured apps.
 
     Args:
-        configs: List of app configurations
+        configs: App configurations grouped by type
         output_dir: Directory to write generated manifests
         repo_root: Repository root for resolving relative paths
+        handlers: Concrete config handlers to validate and generate manifests
         images: Dict mapping image variable names to image references for template rendering
         charts_dir: Directory for caching pulled charts (default: repo_root/.charts)
         verbose: If True, log detailed output
@@ -327,20 +394,20 @@ def generate_manifests(
         ValueError: If configuration validation fails
         RuntimeError: If manifest generation fails
     """
-    from manifest_builder.website import generate_website
-
     if not configs:
-        logger.info("No charts configured")
+        logger.info("No configs configured")
         return set()
 
     if charts_dir is None:
         charts_dir = Path.home() / ".cache" / "manifest-builder"
 
     owned_namespaces = owned_namespaces or set()
+    jobs = _collect_generation_jobs(configs, handlers)
 
     # Validate all of the configs first
-    for config in configs:
-        validate_config(config, repo_root)
+    for job in jobs:
+        config = job.config
+        job.handler.validate(config, repo_root)
         if config.namespace in owned_namespaces:
             raise ValueError(
                 f"Config '{config.name}' targets namespace '{config.namespace}' "
@@ -351,31 +418,19 @@ def generate_manifests(
     # Map the output paths to the config name that generated them
     written_paths: dict[Path, str] = {}
     cache_stats = ChartCacheStats()
-    for config in configs:
+    context = GenerationContext(
+        output_dir=output_dir,
+        repo_root=repo_root,
+        charts_dir=charts_dir,
+        verbose=verbose,
+        images=images,
+        cache_stats=cache_stats,
+    )
+    for job in jobs:
+        config = job.config
         try:
-            if isinstance(config, WebsiteConfig):
-                logger.info(
-                    f"Generating manifest for {config.name} ({config.namespace})"
-                )
-                paths = generate_website(
-                    config, output_dir, images=images, verbose=verbose
-                )
-            elif isinstance(config, CopyConfig):
-                logger.info(
-                    f"Generating manifest for {config.name} ({config.namespace})"
-                )
-                from manifest_builder.copy import generate_copy
-
-                paths = generate_copy(config, output_dir, images=images)
-            else:
-                paths = _generate_helm_manifests(
-                    config,
-                    output_dir,
-                    charts_dir,
-                    verbose,
-                    images=images,
-                    cache_stats=cache_stats,
-                )
+            logger.info(f"Generating manifest for {config.name} ({config.namespace})")
+            paths = job.handler.generate(config, context)
 
             # Check for conflicts with the previously written files
             conflicts = {p: written_paths[p] for p in paths if p in written_paths}

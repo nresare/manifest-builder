@@ -60,6 +60,25 @@ class CopyConfig:
     config: dict[str, Path] | None = None  # container path -> resolved local path
 
 
+type ManifestConfig = ChartConfig | WebsiteConfig | CopyConfig
+
+
+@dataclass
+class ManifestConfigs:
+    """Application configs grouped by the generator that owns them."""
+
+    helm: list[ChartConfig] = field(default_factory=list)
+    websites: list[WebsiteConfig] = field(default_factory=list)
+    copies: list[CopyConfig] = field(default_factory=list)
+
+    def __len__(self) -> int:
+        return len(self.helm) + len(self.websites) + len(self.copies)
+
+    def all_configs(self) -> tuple[ManifestConfig, ...]:
+        """Return all configs for generic bookkeeping such as handler coverage."""
+        return (*self.helm, *self.websites, *self.copies)
+
+
 def load_images(config_dir: Path) -> dict[str, str]:
     """
     Load container image definitions from images.toml in the config directory.
@@ -147,7 +166,7 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
     return owned
 
 
-def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | CopyConfig]:
+def load_configs(config_dir: Path) -> ManifestConfigs:
     """
     Load all app configurations from TOML files in the config directory.
 
@@ -158,7 +177,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | CopyCon
         config_dir: Directory containing TOML configuration files
 
     Returns:
-        List of app config objects
+        App config objects grouped by config type
 
     Raises:
         FileNotFoundError: If config_dir doesn't exist or contains no TOML files
@@ -170,7 +189,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | CopyCon
     if not config_dir.is_dir():
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
-    configs: list[ChartConfig | WebsiteConfig | CopyConfig] = []
+    configs = ManifestConfigs()
     toml_files = [f for f in config_dir.glob("*.toml") if f.name != "images.toml"]
 
     if not toml_files:
@@ -188,13 +207,13 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | CopyCon
         variables = _parse_variables(data.get("variables"), toml_file)
 
         for helm_data in data.get("helm", []):
-            configs.append(_parse_chart_config(helm_data, toml_file, variables))
+            configs.helm.append(_parse_chart_config(helm_data, toml_file, variables))
 
         for website_data in data.get("website", []):
-            configs.append(_parse_website_config(website_data, toml_file))
+            configs.websites.append(_parse_website_config(website_data, toml_file))
 
         for copy_data in data.get("copy", []):
-            configs.append(_parse_copy_config(copy_data, toml_file))
+            configs.copies.append(_parse_copy_config(copy_data, toml_file))
 
     return configs
 
@@ -356,13 +375,14 @@ def _parse_copy_config(data: dict, source_file: Path) -> CopyConfig:
 
 
 def resolve_configs(
-    configs: list[ChartConfig | WebsiteConfig | CopyConfig],
+    configs: ManifestConfigs,
     helmfile: Helmfile | None,
-) -> list[ChartConfig | WebsiteConfig | CopyConfig]:
+) -> ManifestConfigs:
     """
     Resolve helmfile release references, filling in chart/repo/version.
 
-    Configs without a release reference are returned unchanged.
+    Non-Helm configs and Helm configs without a release reference are returned
+    unchanged.
 
     Args:
         configs: App configs as parsed from TOML
@@ -374,11 +394,11 @@ def resolve_configs(
     Raises:
         ValueError: If a release reference cannot be resolved
     """
-    if not any(isinstance(c, ChartConfig) and c.release for c in configs):
+    if not any(c.release for c in configs.helm):
         return configs
 
     if helmfile is None:
-        names = [c.name for c in configs if isinstance(c, ChartConfig) and c.release]
+        names = [c.name for c in configs.helm if c.release]
         raise ValueError(
             f"Charts {names} reference helmfile releases but no releases.yaml was found"
         )
@@ -388,10 +408,10 @@ def resolve_configs(
     }
     release_by_name = {r.name: r for r in helmfile.releases}
 
-    resolved: list[ChartConfig | WebsiteConfig | CopyConfig] = []
-    for config in configs:
-        if not isinstance(config, ChartConfig) or config.release is None:
-            resolved.append(config)
+    resolved_helm: list[ChartConfig] = []
+    for config in configs.helm:
+        if config.release is None:
+            resolved_helm.append(config)
             continue
 
         release_name = config.release
@@ -426,7 +446,7 @@ def resolve_configs(
             resolved_chart = chart_name
             resolved_repo = repo_url
 
-        resolved.append(
+        resolved_helm.append(
             ChartConfig(
                 name=config.name,
                 namespace=config.namespace,
@@ -441,48 +461,43 @@ def resolve_configs(
             )
         )
 
-    return resolved
+    return ManifestConfigs(
+        helm=resolved_helm,
+        websites=list(configs.websites),
+        copies=list(configs.copies),
+    )
 
 
-def validate_config(
-    config: ChartConfig | WebsiteConfig | CopyConfig, repo_root: Path
-) -> None:
-    """
-    Validate an app configuration.
-
-    Args:
-        config: App configuration to validate
-        repo_root: Repository root directory for resolving relative paths
-
-    Raises:
-        ValueError: If validation fails
-    """
-    if isinstance(config, WebsiteConfig):
-        for container_path, local_path in (config.config or {}).items():
-            if not local_path.exists():
-                raise ValueError(
-                    f"Config file not found for '{config.name}': {local_path} "
-                    f"(mapped from {container_path})"
-                )
-        return
-
-    if isinstance(config, CopyConfig):
-        if not config.source.exists():
+def validate_website_config(config: WebsiteConfig) -> None:
+    """Validate a website app configuration."""
+    for container_path, local_path in (config.config or {}).items():
+        if not local_path.exists():
             raise ValueError(
-                f"source directory not found for '{config.name}': {config.source}"
+                f"Config file not found for '{config.name}': {local_path} "
+                f"(mapped from {container_path})"
             )
-        if not config.source.is_dir():
-            raise ValueError(
-                f"source path is not a directory for '{config.name}': {config.source}"
-            )
-        for container_path, local_path in (config.config or {}).items():
-            if not local_path.exists():
-                raise ValueError(
-                    f"Config file not found for '{config.name}': {local_path} "
-                    f"(mapped from {container_path})"
-                )
-        return
 
+
+def validate_copy_config(config: CopyConfig) -> None:
+    """Validate a copy app configuration."""
+    if not config.source.exists():
+        raise ValueError(
+            f"source directory not found for '{config.name}': {config.source}"
+        )
+    if not config.source.is_dir():
+        raise ValueError(
+            f"source path is not a directory for '{config.name}': {config.source}"
+        )
+    for container_path, local_path in (config.config or {}).items():
+        if not local_path.exists():
+            raise ValueError(
+                f"Config file not found for '{config.name}': {local_path} "
+                f"(mapped from {container_path})"
+            )
+
+
+def validate_chart_config(config: ChartConfig, repo_root: Path) -> None:
+    """Validate a Helm chart configuration."""
     for values_path in config.values:
         if not values_path.exists():
             raise ValueError(
@@ -510,3 +525,18 @@ def validate_config(
 
     if config.init is not None and not config.init.exists():
         raise ValueError(f"init script not found for '{config.name}': {config.init}")
+
+
+def validate_config(config: ManifestConfig, repo_root: Path) -> None:
+    """
+    Validate an app configuration.
+
+    Kept as a compatibility helper for callers that already have a concrete
+    config object. The main generation path uses config handlers instead.
+    """
+    if isinstance(config, WebsiteConfig):
+        validate_website_config(config)
+    elif isinstance(config, CopyConfig):
+        validate_copy_config(config)
+    else:
+        validate_chart_config(config, repo_root)

@@ -14,7 +14,9 @@ from manifest_builder.config import (
     load_owned_namespaces,
     resolve_configs,
 )
+from manifest_builder.copy import CopyConfigHandler
 from manifest_builder.generator import (
+    HelmConfigHandler,
     ManifestError,
     generate_manifests,
     plural,
@@ -28,6 +30,7 @@ from manifest_builder.git_utils import (
 )
 from manifest_builder.helm import get_helm_version
 from manifest_builder.helmfile import load_helmfile
+from manifest_builder.website import WebsiteConfigHandler
 
 
 @click.command()
@@ -117,9 +120,7 @@ def main(
         configs = resolve_configs(configs, helmfile_data)
 
         if verbose:
-            click.echo(
-                f"Loaded {len(configs)} chart configuration{plural(len(configs))}"
-            )
+            click.echo(f"Loaded {len(configs)} app configuration{plural(len(configs))}")
 
         # Load container image definitions
         images = load_images(config_dir)
@@ -145,10 +146,12 @@ def main(
             )
 
         # Generate manifests
+        handlers = [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
         written_paths = generate_manifests(
             configs=configs,
             output_dir=output_dir,
             repo_root=repo_root,
+            handlers=handlers,
             images=images,
             verbose=verbose,
             owned_namespaces=owned_namespaces,

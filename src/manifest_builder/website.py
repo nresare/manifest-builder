@@ -9,12 +9,48 @@ from typing import Any
 
 import yaml
 
-from manifest_builder.config import WebsiteConfig
+from manifest_builder.config import (
+    ManifestConfig,
+    ManifestConfigs,
+    WebsiteConfig,
+    validate_website_config,
+)
 from manifest_builder.generator import (
     CLUSTER_SCOPED_KINDS,
     _make_k8s_name,
     _write_documents,
 )
+from manifest_builder.handlers import ConfigHandler, GenerationContext
+
+
+class WebsiteConfigHandler(ConfigHandler):
+    """Generate manifests for website configs."""
+
+    def iter_configs(self, configs: ManifestConfigs) -> list[WebsiteConfig]:
+        return configs.websites
+
+    def validate(self, config: ManifestConfig, repo_root: Path) -> None:
+        if not isinstance(config, WebsiteConfig):
+            raise TypeError(
+                f"WebsiteConfigHandler cannot process {type(config).__name__}"
+            )
+        validate_website_config(config)
+
+    def generate(
+        self,
+        config: ManifestConfig,
+        context: GenerationContext,
+    ) -> set[Path]:
+        if not isinstance(config, WebsiteConfig):
+            raise TypeError(
+                f"WebsiteConfigHandler cannot process {type(config).__name__}"
+            )
+        return generate_website(
+            config,
+            context.output_dir,
+            images=context.images,
+            verbose=context.verbose,
+        )
 
 
 def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:

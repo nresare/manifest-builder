@@ -10,8 +10,9 @@ import pytest
 import yaml
 from pystache.context import KeyNotFoundError
 
-from manifest_builder.config import ChartConfig
+from manifest_builder.config import ChartConfig, ManifestConfigs
 from manifest_builder.generator import (
+    HelmConfigHandler,
     _ensure_namespaces,
     _generate_helm_manifests,
     _make_k8s_name,
@@ -155,7 +156,11 @@ def test_generate_manifests_summarizes_chart_cache(
         "manifest_builder.generator.run_helm_template", return_value=NAMESPACED_YAML
     ):
         generate_manifests(
-            [config], tmp_path / "out", repo_root=tmp_path, charts_dir=charts_dir
+            ManifestConfigs(helm=[config]),
+            tmp_path / "out",
+            repo_root=tmp_path,
+            handlers=[HelmConfigHandler()],
+            charts_dir=charts_dir,
         )
 
     assert "Chart cache: 1 hit, 0 misses" in caplog.text
@@ -176,9 +181,10 @@ def test_generate_manifests_rejects_config_in_owned_namespace(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="owned by another service"):
         generate_manifests(
-            [config],
+            ManifestConfigs(helm=[config]),
             tmp_path / "out",
             repo_root=tmp_path,
+            handlers=[HelmConfigHandler()],
             owned_namespaces={"team-a"},
         )
 
@@ -206,9 +212,10 @@ def test_generate_manifests_preserves_files_in_owned_namespace(tmp_path: Path) -
         "manifest_builder.generator.run_helm_template", return_value=NAMESPACED_YAML
     ):
         written = generate_manifests(
-            [config],
+            ManifestConfigs(helm=[config]),
             output_dir,
             repo_root=tmp_path,
+            handlers=[HelmConfigHandler()],
             charts_dir=tmp_path / "charts",
             owned_namespaces={"team-a"},
         )
@@ -246,9 +253,10 @@ data: {}
     ):
         with pytest.raises(ValueError, match="owned by another service"):
             generate_manifests(
-                [config],
+                ManifestConfigs(helm=[config]),
                 tmp_path / "out",
                 repo_root=tmp_path,
+                handlers=[HelmConfigHandler()],
                 charts_dir=tmp_path / "charts",
                 owned_namespaces={"team-a"},
             )
