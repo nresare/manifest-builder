@@ -1,6 +1,6 @@
 # Code Quality Standards for manifest-builder
 
-This document outlines the development practices and tooling requirements for this project when working with Claude Code and other AI assistants.
+This document outlines the development practices and tooling requirements for this project when working with Codex and other AI assistants.
 
 ## Code Quality Checks
 

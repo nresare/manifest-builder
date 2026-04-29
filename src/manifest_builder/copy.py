@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: The manifest-builder contributors
-"""Simple manifest generation by copying existing manifests."""
+"""Copy manifest generation from existing manifests."""
 
 from pathlib import Path
 
@@ -8,7 +8,7 @@ import pystache
 import yaml
 from pystache.common import MissingTags
 
-from manifest_builder.config import SimpleConfig
+from manifest_builder.config import CopyConfig
 from manifest_builder.generator import (
     CLUSTER_SCOPED_KINDS,
     _make_k8s_name,
@@ -21,14 +21,14 @@ from manifest_builder.website import (
 )
 
 
-def generate_simple(
-    config: SimpleConfig,
+def generate_copy(
+    config: CopyConfig,
     output_dir: Path,
     images: dict[str, str] | None = None,
 ) -> set[Path]:
-    """Generate manifests for a simple app by copying existing manifests.
+    """Generate manifests for a copy app by copying existing manifests.
 
-    Reads all YAML files from the copy-from directory, injects the configured
+    Reads all YAML files from the source directory, injects the configured
     namespace into any namespaced resources that don't already have one, and
     optionally creates a ConfigMap from the files listed in the config table.
 
@@ -36,7 +36,7 @@ def generate_simple(
     replacing {{variable}} with the corresponding image reference.
 
     Args:
-        config: Simple app configuration
+        config: Copy app configuration
         output_dir: Directory to write generated manifests
         images: Dict mapping image variable names to image references
 
@@ -47,7 +47,7 @@ def generate_simple(
     docs: list[dict] = []
     context = images or {}
 
-    for yaml_file in sorted(config.copy_from.glob("*.yaml")):
+    for yaml_file in sorted(config.source.glob("*.yaml")):
         text = yaml_file.read_text()
         text = renderer.render(text, context)
 

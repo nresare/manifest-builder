@@ -51,12 +51,12 @@ class WebsiteConfig:
 
 
 @dataclass
-class SimpleConfig:
-    """Configuration for a simple app that copies existing manifests verbatim."""
+class CopyConfig:
+    """Configuration for an app that copies existing manifests verbatim."""
 
     name: str
     namespace: str
-    copy_from: Path  # resolved directory containing manifests to copy
+    source: Path  # resolved directory containing manifests to copy
     config: dict[str, Path] | None = None  # container path -> resolved local path
 
 
@@ -147,12 +147,12 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
     return owned
 
 
-def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleConfig]:
+def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | CopyConfig]:
     """
     Load all app configurations from TOML files in the config directory.
 
     Each TOML file may contain a [variables] table and [[helm]], [[website]],
-    and [[simple]] tables.
+    and [[copy]] tables.
 
     Args:
         config_dir: Directory containing TOML configuration files
@@ -170,7 +170,7 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
     if not config_dir.is_dir():
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
-    configs: list[ChartConfig | WebsiteConfig | SimpleConfig] = []
+    configs: list[ChartConfig | WebsiteConfig | CopyConfig] = []
     toml_files = [f for f in config_dir.glob("*.toml") if f.name != "images.toml"]
 
     if not toml_files:
@@ -180,9 +180,9 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
         with open(toml_file, "rb") as f:
             data = tomllib.load(f)
 
-        if "helm" not in data and "website" not in data and "simple" not in data:
+        if "helm" not in data and "website" not in data and "copy" not in data:
             raise ValueError(
-                f"No [[helm]], [[website]], or [[simple]] entries found in {toml_file}"
+                f"No [[helm]], [[website]], or [[copy]] entries found in {toml_file}"
             )
 
         variables = _parse_variables(data.get("variables"), toml_file)
@@ -193,8 +193,8 @@ def load_configs(config_dir: Path) -> list[ChartConfig | WebsiteConfig | SimpleC
         for website_data in data.get("website", []):
             configs.append(_parse_website_config(website_data, toml_file))
 
-        for simple_data in data.get("simple", []):
-            configs.append(_parse_simple_config(simple_data, toml_file))
+        for copy_data in data.get("copy", []):
+            configs.append(_parse_copy_config(copy_data, toml_file))
 
     return configs
 
@@ -321,9 +321,9 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
     )
 
 
-def _parse_simple_config(data: dict, source_file: Path) -> SimpleConfig:
-    """Parse a simple app configuration from TOML data."""
-    for required_field in ("namespace", "copy-from"):
+def _parse_copy_config(data: dict, source_file: Path) -> CopyConfig:
+    """Parse a copy app configuration from TOML data."""
+    for required_field in ("namespace", "source"):
         if required_field not in data:
             raise ValueError(
                 f"Missing required field '{required_field}' in {source_file}"
@@ -331,12 +331,12 @@ def _parse_simple_config(data: dict, source_file: Path) -> SimpleConfig:
 
     config_dir = source_file.parent
     name = data.get("name", data["namespace"])
-    copy_from = config_dir / data["copy-from"]
+    source = config_dir / data["source"]
 
     config_dict = None
     config_data = data.get("config")
     if config_data is not None:
-        # Support both [simple.config] (dict) and [[simple.config]] (list of dicts)
+        # Support both [copy.config] (dict) and [[copy.config]] (list of dicts)
         if isinstance(config_data, list):
             merged: dict[str, str] = {}
             for item in config_data:
@@ -347,18 +347,18 @@ def _parse_simple_config(data: dict, source_file: Path) -> SimpleConfig:
             for container_path, local_path in config_data.items()
         }
 
-    return SimpleConfig(
+    return CopyConfig(
         name=name,
         namespace=data["namespace"],
-        copy_from=copy_from,
+        source=source,
         config=config_dict,
     )
 
 
 def resolve_configs(
-    configs: list[ChartConfig | WebsiteConfig | SimpleConfig],
+    configs: list[ChartConfig | WebsiteConfig | CopyConfig],
     helmfile: Helmfile | None,
-) -> list[ChartConfig | WebsiteConfig | SimpleConfig]:
+) -> list[ChartConfig | WebsiteConfig | CopyConfig]:
     """
     Resolve helmfile release references, filling in chart/repo/version.
 
@@ -388,7 +388,7 @@ def resolve_configs(
     }
     release_by_name = {r.name: r for r in helmfile.releases}
 
-    resolved: list[ChartConfig | WebsiteConfig | SimpleConfig] = []
+    resolved: list[ChartConfig | WebsiteConfig | CopyConfig] = []
     for config in configs:
         if not isinstance(config, ChartConfig) or config.release is None:
             resolved.append(config)
@@ -445,7 +445,7 @@ def resolve_configs(
 
 
 def validate_config(
-    config: ChartConfig | WebsiteConfig | SimpleConfig, repo_root: Path
+    config: ChartConfig | WebsiteConfig | CopyConfig, repo_root: Path
 ) -> None:
     """
     Validate an app configuration.
@@ -466,14 +466,14 @@ def validate_config(
                 )
         return
 
-    if isinstance(config, SimpleConfig):
-        if not config.copy_from.exists():
+    if isinstance(config, CopyConfig):
+        if not config.source.exists():
             raise ValueError(
-                f"copy-from directory not found for '{config.name}': {config.copy_from}"
+                f"source directory not found for '{config.name}': {config.source}"
             )
-        if not config.copy_from.is_dir():
+        if not config.source.is_dir():
             raise ValueError(
-                f"copy-from path is not a directory for '{config.name}': {config.copy_from}"
+                f"source path is not a directory for '{config.name}': {config.source}"
             )
         for container_path, local_path in (config.config or {}).items():
             if not local_path.exists():
