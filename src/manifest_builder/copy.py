@@ -8,17 +8,44 @@ import pystache
 import yaml
 from pystache.common import MissingTags
 
-from manifest_builder.config import CopyConfig
+from manifest_builder.config import (
+    CopyConfig,
+    ManifestConfig,
+    ManifestConfigs,
+    validate_copy_config,
+)
 from manifest_builder.generator import (
     CLUSTER_SCOPED_KINDS,
     _make_k8s_name,
     _write_documents,
 )
+from manifest_builder.handlers import ConfigHandler, GenerationContext
 from manifest_builder.website import (
     _config_checksum,
     _configmap_suffix_from_mount_path,
     _make_configmaps,
 )
+
+
+class CopyConfigHandler(ConfigHandler):
+    """Generate manifests for copy configs."""
+
+    def iter_configs(self, configs: ManifestConfigs) -> list[CopyConfig]:
+        return configs.copies
+
+    def validate(self, config: ManifestConfig, repo_root: Path) -> None:
+        if not isinstance(config, CopyConfig):
+            raise TypeError(f"CopyConfigHandler cannot process {type(config).__name__}")
+        validate_copy_config(config)
+
+    def generate(
+        self,
+        config: ManifestConfig,
+        context: GenerationContext,
+    ) -> set[Path]:
+        if not isinstance(config, CopyConfig):
+            raise TypeError(f"CopyConfigHandler cannot process {type(config).__name__}")
+        return generate_copy(config, context.output_dir, images=context.images)
 
 
 def generate_copy(

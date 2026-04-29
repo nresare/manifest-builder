@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from manifest_builder.config import WebsiteConfig
+from manifest_builder.config import ManifestConfigs, WebsiteConfig
 from manifest_builder.generator import ManifestError, generate_manifests
-from manifest_builder.website import generate_website
+from manifest_builder.website import WebsiteConfigHandler, generate_website
 
 SIMPLE_DEPLOYMENT = """\
 apiVersion: apps/v1
@@ -153,7 +153,12 @@ def test_generate_manifests_with_website_config(tmp_path: Path) -> None:
     config = WebsiteConfig(name="zq.lu", namespace="web")
     output_dir = tmp_path / "output"
 
-    generate_manifests([config], output_dir, repo_root=tmp_path)
+    generate_manifests(
+        ManifestConfigs(websites=[config]),
+        output_dir,
+        repo_root=tmp_path,
+        handlers=[WebsiteConfigHandler()],
+    )
 
     # Check that files were generated from the bundled web templates
     assert output_dir.exists()
@@ -171,7 +176,12 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
     stale.write_text("stale: true\n")
 
     config = WebsiteConfig(name="zq.lu", namespace="web")
-    generate_manifests([config], output_dir, repo_root=tmp_path)
+    generate_manifests(
+        ManifestConfigs(websites=[config]),
+        output_dir,
+        repo_root=tmp_path,
+        handlers=[WebsiteConfigHandler()],
+    )
 
     assert not stale.exists()
     # Check that files were generated
@@ -227,7 +237,12 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
         ],
     ):
         with pytest.raises(ManifestError, match="Configuration conflict"):
-            generate_manifests([config1, config2], output_dir, repo_root=tmp_path)
+            generate_manifests(
+                ManifestConfigs(websites=[config1, config2]),
+                output_dir,
+                repo_root=tmp_path,
+                handlers=[WebsiteConfigHandler()],
+            )
 
 
 def test_generate_website_provides_k8s_name_variable(tmp_path: Path) -> None:

@@ -11,6 +11,8 @@ from manifest_builder.config import (
     DEFAULT_REPLICA_COUNT,
     ChartConfig,
     CopyConfig,
+    ManifestConfig,
+    ManifestConfigs,
     WebsiteConfig,
     load_configs,
     load_images,
@@ -25,6 +27,11 @@ def write_toml(directory: Path, name: str, content: str) -> Path:
     path = directory / name
     path.write_text(textwrap.dedent(content))
     return path
+
+
+def only_config(configs: ManifestConfigs) -> ManifestConfig:
+    (config,) = configs.all_configs()
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +57,7 @@ def test_values_resolved_relative_to_config_dir(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.values == [conf_dir / "myapp/values.yaml"]
 
@@ -78,11 +85,13 @@ def test_values_resolved_relative_to_custom_config_dir(tmp_path: Path) -> None:
     configs_a = load_configs(conf_a)
     configs_b = load_configs(conf_b)
 
-    assert isinstance(configs_a[0], ChartConfig)
-    assert isinstance(configs_b[0], ChartConfig)
-    assert configs_a[0].values == [conf_a / "values.yaml"]
-    assert configs_b[0].values == [conf_b / "values.yaml"]
-    assert configs_a[0].values != configs_b[0].values
+    config_a = only_config(configs_a)
+    config_b = only_config(configs_b)
+    assert isinstance(config_a, ChartConfig)
+    assert isinstance(config_b, ChartConfig)
+    assert config_a.values == [conf_a / "values.yaml"]
+    assert config_b.values == [conf_b / "values.yaml"]
+    assert config_a.values != config_b.values
 
 
 def test_values_empty_when_not_specified(tmp_path: Path) -> None:
@@ -100,7 +109,7 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
     )
 
     configs = load_configs(conf_dir)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.values == []
 
@@ -128,7 +137,7 @@ def test_variables_are_loaded_for_helm_configs(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.variables == {
         "domain": "example.com",
@@ -294,7 +303,7 @@ def test_load_configs_multiple_toml_files(tmp_path: Path) -> None:
     )
 
     configs = load_configs(conf)
-    names = {c.name for c in configs}
+    names = {c.name for c in configs.all_configs()}
     assert names == {"app-a", "app-b"}
 
 
@@ -318,8 +327,10 @@ def test_load_configs_mixed_helms_and_websites(tmp_path: Path) -> None:
 
     configs = load_configs(conf)
     assert len(configs) == 2
-    assert isinstance(configs[0], ChartConfig)
-    assert isinstance(configs[1], WebsiteConfig)
+    assert len(configs.helm) == 1
+    assert len(configs.websites) == 1
+    assert isinstance(configs.helm[0], ChartConfig)
+    assert isinstance(configs.websites[0], WebsiteConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -353,9 +364,9 @@ def test_resolve_configs_fills_in_chart_and_repo(tmp_path: Path) -> None:
         values=[],
         release="myapp",
     )
-    resolved = resolve_configs([config], _make_helmfile())
+    resolved = resolve_configs(ManifestConfigs(helm=[config]), _make_helmfile())
     assert len(resolved) == 1
-    resolved_config = resolved[0]
+    resolved_config = resolved.helm[0]
     assert isinstance(resolved_config, ChartConfig)
     assert resolved_config.chart == "myapp"
     assert resolved_config.repo == "https://charts.example.com"
@@ -375,7 +386,7 @@ def test_resolve_configs_no_helmfile_raises_when_release_present(
         release="myapp",
     )
     with pytest.raises(ValueError, match="no releases.yaml was found"):
-        resolve_configs([config], None)
+        resolve_configs(ManifestConfigs(helm=[config]), None)
 
 
 def test_resolve_configs_unknown_release_raises() -> None:
@@ -389,7 +400,7 @@ def test_resolve_configs_unknown_release_raises() -> None:
         release="unknown",
     )
     with pytest.raises(ValueError, match="not found in releases.yaml"):
-        resolve_configs([config], _make_helmfile())
+        resolve_configs(ManifestConfigs(helm=[config]), _make_helmfile())
 
 
 def test_resolve_configs_oci_repository() -> None:
@@ -420,9 +431,9 @@ def test_resolve_configs_oci_repository() -> None:
         values=[],
         release="envoy-gateway",
     )
-    resolved = resolve_configs([config], helmfile)
+    resolved = resolve_configs(ManifestConfigs(helm=[config]), helmfile)
     assert len(resolved) == 1
-    resolved_config = resolved[0]
+    resolved_config = resolved.helm[0]
     assert isinstance(resolved_config, ChartConfig)
     assert resolved_config.chart == "oci://docker.io/envoyproxy/gateway-helm"
     assert resolved_config.repo is None
@@ -449,7 +460,7 @@ def test_load_website_config(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.name == "my-website"
     assert config.namespace == "production"
@@ -486,7 +497,7 @@ def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.hugo_repo == "https://github.com/user/repo"
 
@@ -507,7 +518,7 @@ def test_load_website_config_with_image(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.image == "nginx:latest"
 
@@ -528,7 +539,7 @@ def test_load_website_config_with_args_string(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.args == "--flag=value"
 
@@ -549,7 +560,7 @@ def test_load_website_config_with_args_list(tmp_path: Path) -> None:
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.args == ["--flag1=value1", "--flag2=value2"]
 
@@ -580,8 +591,8 @@ def test_resolve_configs_passes_website_config_through() -> None:
         name="my-website",
         namespace="default",
     )
-    resolved = resolve_configs([config], None)
-    assert resolved == [config]
+    resolved = resolve_configs(ManifestConfigs(websites=[config]), None)
+    assert resolved.websites == [config]
 
 
 def test_resolve_configs_passthrough_for_direct_chart() -> None:
@@ -595,8 +606,8 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
         release=None,
         extra_resources=None,
     )
-    resolved = resolve_configs([config], None)
-    assert resolved == [config]
+    resolved = resolve_configs(ManifestConfigs(helm=[config]), None)
+    assert resolved.helm == [config]
 
 
 def test_load_website_config_with_config(tmp_path: Path) -> None:
@@ -621,7 +632,7 @@ config = { "/config/app.conf" = "app.conf" }
 
     configs = load_configs(conf_dir)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.config is not None
     assert config.config["/config/app.conf"] == conf_dir / "app.conf"
@@ -648,7 +659,7 @@ config = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
     )
 
     configs = load_configs(conf_dir)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.config is not None
     assert len(config.config) == 2
@@ -681,7 +692,7 @@ extra-hostnames = "www.example.com"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.extra_hostnames == "www.example.com"
 
@@ -700,7 +711,7 @@ extra-hostnames = ["www.example.com", "example.cdn.com"]
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.extra_hostnames == ["www.example.com", "example.cdn.com"]
 
@@ -720,7 +731,7 @@ external-secrets = ["/email-password", "/db/credentials"]
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.external_secrets == ["/email-password", "/db/credentials"]
 
@@ -740,7 +751,7 @@ external-secrets = "/api-key"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.external_secrets == ["/api-key"]
 
@@ -760,7 +771,7 @@ custom-token-audience = "vault"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.custom_token_audience == "vault"
 
@@ -780,7 +791,7 @@ replicas = 5
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.replicas == 5
 
@@ -800,7 +811,7 @@ replicas = 1
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.replicas == 1
 
@@ -819,7 +830,7 @@ image = "nginx:latest"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.replicas == DEFAULT_REPLICA_COUNT
 
@@ -844,7 +855,7 @@ extra-resources = "resources"
     )
 
     configs = load_configs(conf_dir)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.extra_resources == resources_dir
 
@@ -906,7 +917,7 @@ init = "setup.sh"
     )
 
     configs = load_configs(conf_dir)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.init == script_file
 
@@ -952,7 +963,7 @@ source = "manifests"
 
     configs = load_configs(tmp_path)
     assert len(configs) == 1
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.namespace == "acme-dns"
     assert config.source == tmp_path / "manifests"
@@ -973,7 +984,7 @@ source = "manifests"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.name == "acme-dns"
 
@@ -993,7 +1004,7 @@ source = "manifests"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.name == "my-app"
 
@@ -1044,7 +1055,7 @@ source = "manifests"
     )
 
     configs = load_configs(conf_dir)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.source == conf_dir / "manifests"
 
@@ -1066,7 +1077,7 @@ source = "manifests"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.config is not None
     assert config.config["/config/app.cfg"] == tmp_path / "app.cfg"
@@ -1090,7 +1101,7 @@ source = "manifests"
     )
 
     configs = load_configs(tmp_path)
-    config = configs[0]
+    config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.config is not None
     assert set(config.config.keys()) == {"/config/app.cfg", "/config/other.cfg"}
