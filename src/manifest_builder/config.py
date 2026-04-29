@@ -168,9 +168,9 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
 
 def load_configs(config_dir: Path) -> ManifestConfigs:
     """
-    Load all app configurations from TOML files in the config directory.
+    Load app configurations from config.toml in the config directory.
 
-    Each TOML file may contain a [variables] table and [[helm]], [[website]],
+    The config.toml file may contain a [variables] table and [[helm]], [[website]],
     and [[copy]] tables.
 
     Args:
@@ -180,7 +180,7 @@ def load_configs(config_dir: Path) -> ManifestConfigs:
         App config objects grouped by config type
 
     Raises:
-        FileNotFoundError: If config_dir doesn't exist or contains no TOML files
+        FileNotFoundError: If config_dir or config.toml doesn't exist
         ValueError: If TOML is invalid or missing required fields
     """
     if not config_dir.exists():
@@ -189,31 +189,29 @@ def load_configs(config_dir: Path) -> ManifestConfigs:
     if not config_dir.is_dir():
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
+    toml_file = config_dir / "config.toml"
+    if not toml_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {toml_file}")
+
+    with open(toml_file, "rb") as f:
+        data = tomllib.load(f)
+
+    if "helm" not in data and "website" not in data and "copy" not in data:
+        raise ValueError(
+            f"No [[helm]], [[website]], or [[copy]] entries found in {toml_file}"
+        )
+
+    variables = _parse_variables(data.get("variables"), toml_file)
+
     configs = ManifestConfigs()
-    toml_files = [f for f in config_dir.glob("*.toml") if f.name != "images.toml"]
+    for helm_data in data.get("helm", []):
+        configs.helm.append(_parse_chart_config(helm_data, toml_file, variables))
 
-    if not toml_files:
-        raise FileNotFoundError(f"No TOML files found in {config_dir}")
+    for website_data in data.get("website", []):
+        configs.websites.append(_parse_website_config(website_data, toml_file))
 
-    for toml_file in toml_files:
-        with open(toml_file, "rb") as f:
-            data = tomllib.load(f)
-
-        if "helm" not in data and "website" not in data and "copy" not in data:
-            raise ValueError(
-                f"No [[helm]], [[website]], or [[copy]] entries found in {toml_file}"
-            )
-
-        variables = _parse_variables(data.get("variables"), toml_file)
-
-        for helm_data in data.get("helm", []):
-            configs.helm.append(_parse_chart_config(helm_data, toml_file, variables))
-
-        for website_data in data.get("website", []):
-            configs.websites.append(_parse_website_config(website_data, toml_file))
-
-        for copy_data in data.get("copy", []):
-            configs.copies.append(_parse_copy_config(copy_data, toml_file))
+    for copy_data in data.get("copy", []):
+        configs.copies.append(_parse_copy_config(copy_data, toml_file))
 
     return configs
 

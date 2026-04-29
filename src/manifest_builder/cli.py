@@ -173,7 +173,6 @@ def main(
                 written_paths,
                 owned_namespaces,
             )
-            click.echo(f"✓ Created commit in {output_dir}")
 
     except ManifestError as e:
         click.echo(f"Error processing {e.config_name}: {e}", err=True)
