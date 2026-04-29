@@ -2,7 +2,9 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Copy manifest generation from existing manifests."""
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pystache
 import yaml
@@ -11,7 +13,6 @@ from pystache.common import MissingTags
 from manifest_builder.config import (
     CopyConfig,
     ManifestConfig,
-    ManifestConfigs,
     validate_copy_config,
 )
 from manifest_builder.generator import (
@@ -30,8 +31,30 @@ from manifest_builder.website import (
 class CopyConfigHandler(ConfigHandler):
     """Generate manifests for copy configs."""
 
-    def iter_configs(self, configs: ManifestConfigs) -> list[CopyConfig]:
-        return configs.copies
+    def __init__(self, configs: Sequence[CopyConfig] | None = None) -> None:
+        self.configs = list(configs or [])
+
+    def top_level_config_name(self) -> str:
+        return "copy"
+
+    def load_config(
+        self,
+        data: object,
+        source_file: Path,
+        root_config: dict[str, Any],
+    ) -> None:
+        if not isinstance(data, list):
+            raise ValueError(f"'copy' must be a list of tables in {source_file}")
+
+        for item in data:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Each [[copy]] entry must be a table in {source_file}"
+                )
+            self.configs.append(_parse_copy_config(item, source_file))
+
+    def iter_configs(self) -> list[CopyConfig]:
+        return self.configs
 
     def validate(self, config: ManifestConfig, repo_root: Path) -> None:
         if not isinstance(config, CopyConfig):
@@ -46,6 +69,40 @@ class CopyConfigHandler(ConfigHandler):
         if not isinstance(config, CopyConfig):
             raise TypeError(f"CopyConfigHandler cannot process {type(config).__name__}")
         return generate_copy(config, context.output_dir, images=context.images)
+
+
+def _parse_copy_config(data: dict, source_file: Path) -> CopyConfig:
+    """Parse a copy app configuration from TOML data."""
+    for required_field in ("namespace", "source"):
+        if required_field not in data:
+            raise ValueError(
+                f"Missing required field '{required_field}' in {source_file}"
+            )
+
+    config_dir = source_file.parent
+    name = data.get("name", data["namespace"])
+    source = config_dir / data["source"]
+
+    config_dict = None
+    config_data = data.get("config")
+    if config_data is not None:
+        # Support both [copy.config] (dict) and [[copy.config]] (list of dicts)
+        if isinstance(config_data, list):
+            merged: dict[str, str] = {}
+            for item in config_data:
+                merged.update(item)
+            config_data = merged
+        config_dict = {
+            container_path: config_dir / local_path
+            for container_path, local_path in config_data.items()
+        }
+
+    return CopyConfig(
+        name=name,
+        namespace=data["namespace"],
+        source=source,
+        config=config_dict,
+    )
 
 
 def generate_copy(

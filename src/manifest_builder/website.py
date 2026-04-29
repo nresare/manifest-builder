@@ -4,14 +4,15 @@
 
 import hashlib
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from manifest_builder.config import (
+    DEFAULT_REPLICA_COUNT,
     ManifestConfig,
-    ManifestConfigs,
     WebsiteConfig,
     validate_website_config,
 )
@@ -26,8 +27,30 @@ from manifest_builder.handlers import ConfigHandler, GenerationContext
 class WebsiteConfigHandler(ConfigHandler):
     """Generate manifests for website configs."""
 
-    def iter_configs(self, configs: ManifestConfigs) -> list[WebsiteConfig]:
-        return configs.websites
+    def __init__(self, configs: Sequence[WebsiteConfig] | None = None) -> None:
+        self.configs = list(configs or [])
+
+    def top_level_config_name(self) -> str:
+        return "website"
+
+    def load_config(
+        self,
+        data: object,
+        source_file: Path,
+        root_config: dict[str, Any],
+    ) -> None:
+        if not isinstance(data, list):
+            raise ValueError(f"'website' must be a list of tables in {source_file}")
+
+        for item in data:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Each [[website]] entry must be a table in {source_file}"
+                )
+            self.configs.append(_parse_website_config(item, source_file))
+
+    def iter_configs(self) -> list[WebsiteConfig]:
+        return self.configs
 
     def validate(self, config: ManifestConfig, repo_root: Path) -> None:
         if not isinstance(config, WebsiteConfig):
@@ -51,6 +74,48 @@ class WebsiteConfigHandler(ConfigHandler):
             images=context.images,
             verbose=context.verbose,
         )
+
+
+def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
+    """Parse a website app configuration from TOML data."""
+    for required_field in ("name", "namespace"):
+        if required_field not in data:
+            raise ValueError(
+                f"Missing required field '{required_field}' in {source_file}"
+            )
+
+    hugo_repo = data.get("hugo-repo")
+    image = data.get("image")
+
+    if hugo_repo and image:
+        raise ValueError(
+            f"Cannot specify both 'hugo-repo' and 'image' in {source_file}"
+        )
+
+    config_dir = source_file.parent
+    config_dict = None
+    if "config" in data:
+        config_dict = {
+            container_path: config_dir / local_path
+            for container_path, local_path in data["config"].items()
+        }
+
+    external_secrets = data.get("external-secrets")
+    if external_secrets is not None and isinstance(external_secrets, str):
+        external_secrets = [external_secrets]
+
+    return WebsiteConfig(
+        name=data["name"],
+        namespace=data["namespace"],
+        hugo_repo=hugo_repo,
+        image=image,
+        args=data.get("args"),
+        config=config_dict,
+        extra_hostnames=data.get("extra-hostnames"),
+        external_secrets=external_secrets,
+        custom_token_audience=data.get("custom-token-audience"),
+        replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
+    )
 
 
 def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:

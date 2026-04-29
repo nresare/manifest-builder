@@ -46,8 +46,98 @@ class ManifestError(Exception):
 class HelmConfigHandler(ConfigHandler):
     """Generate manifests for Helm chart configs."""
 
-    def iter_configs(self, configs: ManifestConfigs) -> Sequence[ManifestConfig]:
-        return configs.helm
+    def __init__(self, configs: Sequence[ChartConfig] | None = None) -> None:
+        self.configs = list(configs or [])
+
+    def top_level_config_name(self) -> str:
+        return "helm"
+
+    def load_config(
+        self,
+        data: object,
+        source_file: Path,
+        root_config: dict[str, Any],
+    ) -> None:
+        if not isinstance(data, list):
+            raise ValueError(f"'helm' must be a list of tables in {source_file}")
+
+        variables = _parse_variables(root_config.get("variables"), source_file)
+        for item in data:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Each [[helm]] entry must be a table in {source_file}"
+                )
+            self.configs.append(_parse_chart_config(item, source_file, variables))
+
+    def iter_configs(self) -> Sequence[ManifestConfig]:
+        return self.configs
+
+    def resolve(self, helmfile: object | None) -> None:
+        if not any(config.release for config in self.configs):
+            return
+
+        if helmfile is None:
+            names = [config.name for config in self.configs if config.release]
+            raise ValueError(
+                f"Charts {names} reference helmfile releases but no releases.yaml was found"
+            )
+
+        release_data = _get_helmfile_data(helmfile)
+        repo_by_name = release_data[0]
+        release_by_name = release_data[1]
+
+        resolved: list[ChartConfig] = []
+        for config in self.configs:
+            if config.release is None:
+                resolved.append(config)
+                continue
+
+            release_name = config.release
+            if release_name not in release_by_name:
+                raise ValueError(f"Release '{release_name}' not found in releases.yaml")
+
+            hf_release = release_by_name[release_name]
+
+            parts = hf_release.chart.split("/", 1)
+            if len(parts) != 2:
+                raise ValueError(
+                    f"helmfile release '{release_name}' chart '{hf_release.chart}' "
+                    "must be in 'reponame/chartname' format"
+                )
+            repo_name, chart_name = parts
+
+            if repo_name not in repo_by_name:
+                raise ValueError(
+                    f"Repository '{repo_name}' referenced by release '{release_name}' "
+                    "not found in releases.yaml repositories"
+                )
+
+            repo_url = repo_by_name[repo_name]
+
+            if repo_url.startswith("oci://"):
+                base_url = repo_url.rstrip("/")
+                resolved_chart = f"{base_url}/{chart_name}"
+                resolved_repo = None
+            else:
+                resolved_chart = chart_name
+                resolved_repo = repo_url
+
+            resolved.append(
+                ChartConfig(
+                    name=config.name,
+                    namespace=config.namespace,
+                    chart=resolved_chart,
+                    repo=resolved_repo,
+                    version=hf_release.version,
+                    values=config.values,
+                    variables=config.variables,
+                    release=config.release,
+                    extra_resources=config.extra_resources,
+                    init=config.init,
+                )
+            )
+
+        self.configs = resolved
 
     def validate(self, config: ManifestConfig, repo_root: Path) -> None:
         if not isinstance(config, ChartConfig):
@@ -69,6 +159,98 @@ class HelmConfigHandler(ConfigHandler):
             images=context.images,
             cache_stats=context.cache_stats,
         )
+
+
+def _parse_chart_config(
+    data: dict,
+    source_file: Path,
+    variables: dict[str, TemplateValue],
+) -> ChartConfig:
+    """Parse a single Helm chart configuration from TOML data."""
+    has_release = "release" in data
+    has_chart = "chart" in data
+
+    if has_release and has_chart:
+        raise ValueError(f"Cannot specify both 'release' and 'chart' in {source_file}")
+    if not has_release and not has_chart:
+        raise ValueError(f"Must specify either 'release' or 'chart' in {source_file}")
+    if "namespace" not in data:
+        raise ValueError(f"Missing required field 'namespace' in {source_file}")
+
+    config_dir = source_file.parent
+    values = [config_dir / v for v in data.get("values", [])]
+
+    extra_resources = None
+    if "extra-resources" in data:
+        extra_resources = config_dir / data["extra-resources"]
+
+    init = None
+    if "init" in data:
+        init = config_dir / data["init"]
+
+    if has_release:
+        return ChartConfig(
+            name=data["release"],
+            namespace=data["namespace"],
+            chart=None,
+            repo=None,
+            version=None,
+            values=values,
+            variables=variables.copy(),
+            release=data["release"],
+            extra_resources=extra_resources,
+            init=init,
+        )
+
+    if "name" not in data:
+        raise ValueError(f"Missing required field 'name' in {source_file}")
+    return ChartConfig(
+        name=data["name"],
+        namespace=data["namespace"],
+        chart=data["chart"],
+        repo=data.get("repo"),
+        version=data.get("version"),
+        values=values,
+        variables=variables.copy(),
+        release=None,
+        extra_resources=extra_resources,
+        init=init,
+    )
+
+
+def _parse_variables(
+    data: object,
+    source_file: Path,
+) -> dict[str, TemplateValue]:
+    """Parse top-level variables for values file templating."""
+    if data is None:
+        return {}
+
+    if not isinstance(data, dict):
+        raise ValueError(f"'variables' must be a table in {source_file}")
+
+    variables: dict[str, TemplateValue] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            raise ValueError(f"Variable keys in {source_file} must be strings")
+        if not isinstance(value, str | int | float | bool):
+            raise ValueError(
+                f"Variable '{key}' in {source_file} must be a string, number, or boolean"
+            )
+        variables[key] = value
+
+    return variables
+
+
+def _get_helmfile_data(helmfile: object) -> tuple[dict[str, str], dict[str, Any]]:
+    repositories = getattr(helmfile, "repositories")
+    releases = getattr(helmfile, "releases")
+    repo_by_name = {
+        repo.name: (f"oci://{repo.url}" if repo.oci else repo.url)
+        for repo in repositories
+    }
+    release_by_name = {release.name: release for release in releases}
+    return repo_by_name, release_by_name
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -335,15 +517,14 @@ class _GenerationJob:
 
 def _collect_generation_jobs(
     configs: ManifestConfigs,
-    handlers: Sequence[ConfigHandler],
 ) -> list[_GenerationJob]:
     """Pair each loaded config with exactly one registered handler."""
     all_configs = configs.all_configs()
     seen_config_ids: set[int] = set()
     jobs: list[_GenerationJob] = []
 
-    for handler in handlers:
-        for config in handler.iter_configs(configs):
+    for handler in configs.handlers:
+        for config in handler.iter_configs():
             config_id = id(config)
             if config_id in seen_config_ids:
                 raise ValueError(
@@ -366,7 +547,6 @@ def generate_manifests(
     output_dir: Path,
     repo_root: Path,
     *,
-    handlers: Sequence[ConfigHandler],
     images: dict[str, str] | None = None,
     charts_dir: Path | None = None,
     verbose: bool = False,
@@ -379,7 +559,6 @@ def generate_manifests(
         configs: App configurations grouped by type
         output_dir: Directory to write generated manifests
         repo_root: Repository root for resolving relative paths
-        handlers: Concrete config handlers to validate and generate manifests
         images: Dict mapping image variable names to image references for template rendering
         charts_dir: Directory for caching pulled charts (default: repo_root/.charts)
         verbose: If True, log detailed output
@@ -402,7 +581,7 @@ def generate_manifests(
         charts_dir = Path.home() / ".cache" / "manifest-builder"
 
     owned_namespaces = owned_namespaces or set()
-    jobs = _collect_generation_jobs(configs, handlers)
+    jobs = _collect_generation_jobs(configs)
 
     # Validate all of the configs first
     for job in jobs:

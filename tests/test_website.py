@@ -154,10 +154,9 @@ def test_generate_manifests_with_website_config(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
 
     generate_manifests(
-        ManifestConfigs(websites=[config]),
+        ManifestConfigs(handlers=[WebsiteConfigHandler([config])]),
         output_dir,
         repo_root=tmp_path,
-        handlers=[WebsiteConfigHandler()],
     )
 
     # Check that files were generated from the bundled web templates
@@ -177,10 +176,9 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
 
     config = WebsiteConfig(name="zq.lu", namespace="web")
     generate_manifests(
-        ManifestConfigs(websites=[config]),
+        ManifestConfigs(handlers=[WebsiteConfigHandler([config])]),
         output_dir,
         repo_root=tmp_path,
-        handlers=[WebsiteConfigHandler()],
     )
 
     assert not stale.exists()
@@ -238,10 +236,9 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
     ):
         with pytest.raises(ManifestError, match="Configuration conflict"):
             generate_manifests(
-                ManifestConfigs(websites=[config1, config2]),
+                ManifestConfigs(handlers=[WebsiteConfigHandler([config1, config2])]),
                 output_dir,
                 repo_root=tmp_path,
-                handlers=[WebsiteConfigHandler()],
             )
 
 
