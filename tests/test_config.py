@@ -731,6 +731,26 @@ config = { "/config/app.conf" = "app.conf", "/etc/db.yaml" = "db.yaml" }
     assert config.config["/etc/db.yaml"] == conf_dir / "db.yaml"
 
 
+def test_load_website_config_with_persistence(tmp_path: Path) -> None:
+    """Website config can specify persistent storage by mount path."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+persistence = { "/data" = "1Gi" }
+""",
+    )
+
+    configs = load_test_configs(tmp_path)
+    config = only_config(configs)
+    assert isinstance(config, WebsiteConfig)
+    assert config.persistence == {"/data": "1Gi"}
+
+
 def test_validate_config_missing_config_file(tmp_path: Path) -> None:
     """Validation should fail if a referenced config file doesn't exist."""
     config = WebsiteConfig(
