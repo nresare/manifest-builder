@@ -123,11 +123,12 @@ def main(
             SimpleConfigHandler(),
             CopyConfigHandler(),
         ]
-        configs = load_configs(config_dir, handlers)
-        configs = resolve_configs(configs, helmfile_data)
+        handlers = load_configs(config_dir, handlers)
+        handlers = resolve_configs(handlers, helmfile_data)
 
         if verbose:
-            click.echo(f"Loaded {len(configs)} app configuration{plural(len(configs))}")
+            count = sum(1 for handler in handlers for _ in handler.iter_configs())
+            click.echo(f"Loaded {count} app configuration{plural(count)}")
 
         # Load container image definitions
         images = load_images(config_dir)
@@ -154,7 +155,7 @@ def main(
 
         # Generate manifests
         written_paths = generate_manifests(
-            configs=configs,
+            handlers=handlers,
             output_dir=output_dir,
             repo_root=repo_root,
             images=images,

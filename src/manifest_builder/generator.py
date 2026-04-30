@@ -17,7 +17,6 @@ from pystache.common import MissingTags
 from manifest_builder.config import (
     ChartConfig,
     ManifestConfig,
-    ManifestConfigs,
     TemplateValue,
     validate_chart_config,
 )
@@ -516,14 +515,16 @@ class _GenerationJob:
 
 
 def _collect_generation_jobs(
-    configs: ManifestConfigs,
+    handlers: Sequence[ConfigHandler],
 ) -> list[_GenerationJob]:
     """Pair each loaded config with exactly one registered handler."""
-    all_configs = configs.all_configs()
+    all_configs = tuple(
+        config for handler in handlers for config in handler.iter_configs()
+    )
     seen_config_ids: set[int] = set()
     jobs: list[_GenerationJob] = []
 
-    for handler in configs.handlers:
+    for handler in handlers:
         for config in handler.iter_configs():
             config_id = id(config)
             if config_id in seen_config_ids:
@@ -543,7 +544,7 @@ def _collect_generation_jobs(
 
 
 def generate_manifests(
-    configs: ManifestConfigs,
+    handlers: Sequence[ConfigHandler],
     output_dir: Path,
     repo_root: Path,
     *,
@@ -556,7 +557,7 @@ def generate_manifests(
     Generate manifests for all configured apps.
 
     Args:
-        configs: App configurations grouped by type
+        handlers: Loaded config handlers
         output_dir: Directory to write generated manifests
         repo_root: Repository root for resolving relative paths
         images: Dict mapping image variable names to image references for template rendering
@@ -573,7 +574,7 @@ def generate_manifests(
         ValueError: If configuration validation fails
         RuntimeError: If manifest generation fails
     """
-    if not configs:
+    if not handlers:
         logger.info("No configs configured")
         return set()
 
@@ -581,7 +582,10 @@ def generate_manifests(
         charts_dir = Path.home() / ".cache" / "manifest-builder"
 
     owned_namespaces = owned_namespaces or set()
-    jobs = _collect_generation_jobs(configs)
+    jobs = _collect_generation_jobs(handlers)
+    if not jobs:
+        logger.info("No configs configured")
+        return set()
 
     # Validate all of the configs first
     for job in jobs:

@@ -3,16 +3,17 @@
 """Tests for configuration parsing and validation."""
 
 import textwrap
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from manifest_builder.handlers import ConfigHandler
 from manifest_builder.config import (
     DEFAULT_REPLICA_COUNT,
     ChartConfig,
     CopyConfig,
     ManifestConfig,
-    ManifestConfigs,
     SimpleConfig,
     WebsiteConfig,
     load_configs,
@@ -34,8 +35,16 @@ def write_toml(directory: Path, name: str, content: str) -> Path:
     return path
 
 
-def only_config(configs: ManifestConfigs) -> ManifestConfig:
-    (config,) = configs.all_configs()
+def all_configs(
+    handlers: Sequence[ConfigHandler],
+) -> tuple[ManifestConfig, ...]:
+    return tuple(config for handler in handlers for config in handler.iter_configs())
+
+
+def only_config(
+    handlers: Sequence[ConfigHandler],
+) -> ManifestConfig:
+    (config,) = all_configs(handlers)
     return config
 
 
@@ -50,7 +59,9 @@ def config_handlers() -> list[
     ]
 
 
-def load_test_configs(config_dir: Path) -> ManifestConfigs:
+def load_test_configs(
+    config_dir: Path,
+) -> Sequence[ConfigHandler]:
     return load_configs(config_dir, config_handlers())
 
 
@@ -60,15 +71,15 @@ def manifest_configs(
     websites: list[WebsiteConfig] | None = None,
     simples: list[SimpleConfig] | None = None,
     copies: list[CopyConfig] | None = None,
-) -> ManifestConfigs:
-    return ManifestConfigs(
-        handlers=[
-            HelmConfigHandler(helm),
-            WebsiteConfigHandler(websites),
-            SimpleConfigHandler(simples),
-            CopyConfigHandler(copies),
-        ]
-    )
+) -> list[
+    HelmConfigHandler | WebsiteConfigHandler | SimpleConfigHandler | CopyConfigHandler
+]:
+    return [
+        HelmConfigHandler(helm),
+        WebsiteConfigHandler(websites),
+        SimpleConfigHandler(simples),
+        CopyConfigHandler(copies),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +104,7 @@ def test_values_resolved_relative_to_config_dir(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.values == [conf_dir / "myapp/values.yaml"]
@@ -173,7 +184,7 @@ def test_variables_are_loaded_for_helm_configs(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, ChartConfig)
     assert config.variables == {
@@ -417,7 +428,7 @@ def test_load_configs_uses_only_config_toml(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf)
-    names = {c.name for c in configs.all_configs()}
+    names = {c.name for c in all_configs(configs)}
     assert names == {"app-a"}
 
 
@@ -440,8 +451,8 @@ def test_load_configs_mixed_helms_and_websites(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf)
-    assert len(configs) == 2
-    parsed = configs.all_configs()
+    assert len(all_configs(configs)) == 2
+    parsed = all_configs(configs)
     assert sum(isinstance(config, ChartConfig) for config in parsed) == 1
     assert sum(isinstance(config, WebsiteConfig) for config in parsed) == 1
 
@@ -478,7 +489,7 @@ def test_resolve_configs_fills_in_chart_and_repo(tmp_path: Path) -> None:
         release="myapp",
     )
     resolved = resolve_configs(manifest_configs(helm=[config]), _make_helmfile())
-    assert len(resolved) == 1
+    assert len(all_configs(resolved)) == 1
     resolved_config = only_config(resolved)
     assert isinstance(resolved_config, ChartConfig)
     assert resolved_config.chart == "myapp"
@@ -545,7 +556,7 @@ def test_resolve_configs_oci_repository() -> None:
         release="envoy-gateway",
     )
     resolved = resolve_configs(manifest_configs(helm=[config]), helmfile)
-    assert len(resolved) == 1
+    assert len(all_configs(resolved)) == 1
     resolved_config = only_config(resolved)
     assert isinstance(resolved_config, ChartConfig)
     assert resolved_config.chart == "oci://docker.io/envoyproxy/gateway-helm"
@@ -572,7 +583,7 @@ def test_load_website_config(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.name == "my-website"
@@ -609,7 +620,7 @@ def test_load_website_config_with_hugo_repo(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.hugo_repo == "https://github.com/user/repo"
@@ -630,7 +641,7 @@ def test_load_website_config_with_image(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.image == "nginx:latest"
@@ -651,7 +662,7 @@ def test_load_website_config_with_args_string(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.args == "--flag=value"
@@ -672,7 +683,7 @@ def test_load_website_config_with_args_list(tmp_path: Path) -> None:
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.args == ["--flag1=value1", "--flag2=value2"]
@@ -705,7 +716,7 @@ def test_resolve_configs_passes_website_config_through() -> None:
         namespace="default",
     )
     resolved = resolve_configs(manifest_configs(websites=[config]), None)
-    assert resolved.all_configs() == (config,)
+    assert all_configs(resolved) == (config,)
 
 
 def test_resolve_configs_passthrough_for_direct_chart() -> None:
@@ -720,7 +731,7 @@ def test_resolve_configs_passthrough_for_direct_chart() -> None:
         extra_resources=None,
     )
     resolved = resolve_configs(manifest_configs(helm=[config]), None)
-    assert resolved.all_configs() == (config,)
+    assert all_configs(resolved) == (config,)
 
 
 def test_load_website_config_with_config(tmp_path: Path) -> None:
@@ -744,7 +755,7 @@ config = { "/config/app.conf" = "app.conf" }
     )
 
     configs = load_test_configs(conf_dir)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.config is not None
@@ -1095,7 +1106,7 @@ source = "manifests"
     )
 
     configs = load_test_configs(tmp_path)
-    assert len(configs) == 1
+    assert len(all_configs(configs)) == 1
     config = only_config(configs)
     assert isinstance(config, CopyConfig)
     assert config.namespace == "acme-dns"

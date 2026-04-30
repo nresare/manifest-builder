@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from manifest_builder.config import ManifestConfigs, SimpleConfig
+from manifest_builder.config import SimpleConfig
 from manifest_builder.generator import generate_manifests
 from manifest_builder.simple import SimpleConfigHandler, generate_simple
 
@@ -138,7 +138,7 @@ def test_generate_manifests_with_simple_config(tmp_path: Path) -> None:
     )
 
     paths = generate_manifests(
-        ManifestConfigs(handlers=[SimpleConfigHandler([config])]),
+        [SimpleConfigHandler([config])],
         tmp_path / "output",
         repo_root=tmp_path,
     )
