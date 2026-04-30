@@ -1101,6 +1101,72 @@ def test_generate_website_no_external_secrets(tmp_path: Path) -> None:
     assert len(secret_volumes) == 0
 
 
+def test_generate_website_persistence_creates_pvc_and_mount(tmp_path: Path) -> None:
+    """Persistence should create a PVC and mount it in the Deployment."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        persistence={"/data": "1Gi"},
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    pvc_path = next(p for p in paths if "persistentvolumeclaim" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+    pvc_doc = yaml.safe_load(pvc_path.read_text())
+
+    assert pvc_doc["metadata"]["name"] == "my-app-data"
+    assert pvc_doc["metadata"]["namespace"] == "production"
+    assert pvc_doc["spec"] == {
+        "accessModes": ["ReadWriteOnce"],
+        "resources": {"requests": {"storage": "1Gi"}},
+    }
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+    assert {"name": "data", "mountPath": "/data"} in container["volumeMounts"]
+    assert {
+        "name": "data",
+        "persistentVolumeClaim": {"claimName": "my-app-data"},
+    } in pod_spec["volumes"]
+
+
+def test_generate_website_persistence_adds_permission_init_container(
+    tmp_path: Path,
+) -> None:
+    """Persistence should add an initContainer that fixes mount permissions."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        persistence={"/data": "1Gi"},
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    init_containers = deployment_doc["spec"]["template"]["spec"]["initContainers"]
+    assert init_containers == [
+        {
+            "name": "fix-data-permissions",
+            "image": "alpine:3.23.4",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+                "sh",
+                "-c",
+                "mkdir -p /data && chown -R 65532:65532 /data",
+            ],
+            "resources": {},
+            "securityContext": {"allowPrivilegeEscalation": False},
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+        }
+    ]
+
+
 def test_generate_website_custom_token_audience_injects_projected_token(
     tmp_path: Path,
 ) -> None:

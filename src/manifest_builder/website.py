@@ -114,6 +114,7 @@ def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
         extra_hostnames=data.get("extra-hostnames"),
         external_secrets=external_secrets,
         custom_token_audience=data.get("custom-token-audience"),
+        persistence=data.get("persistence"),
         replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
     )
 
@@ -165,6 +166,75 @@ def _secret_name_from_mount_path(mount_path: str) -> str:
     if not mount_path.startswith("/"):
         raise ValueError(f"Mount path must start with /: {mount_path}")
     return mount_path[1:].replace("/", "-")
+
+
+def _persistent_volume_claim_name(k8s_name: str, mount_path: str) -> str:
+    """Generate a PVC claim name for a website persistence mount."""
+    return f"{k8s_name}-{_secret_name_from_mount_path(mount_path)}"
+
+
+def _make_persistent_volume_claims(
+    k8s_name: str, persistence: dict[str, str]
+) -> list[dict]:
+    """Build PersistentVolumeClaim objects for configured persistence mounts."""
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "PersistentVolumeClaim",
+            "metadata": {
+                "name": _persistent_volume_claim_name(k8s_name, mount_path),
+            },
+            "spec": {
+                "accessModes": ["ReadWriteOnce"],
+                "resources": {"requests": {"storage": size}},
+            },
+        }
+        for mount_path, size in sorted(persistence.items())
+    ]
+
+
+def _inject_persistence_mounts(
+    doc: dict, k8s_name: str, persistence: dict[str, str]
+) -> None:
+    """Inject PVC volumes, mounts, and permission-fixer init containers."""
+    if doc.get("kind") != "Deployment":
+        return
+
+    pod_spec = (
+        doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    )
+    for mount_path in sorted(persistence):
+        volume_name = _secret_name_from_mount_path(mount_path)
+        claim_name = _persistent_volume_claim_name(k8s_name, mount_path)
+
+        for container in pod_spec.get("containers", []):
+            container.setdefault("volumeMounts", []).append(
+                {"name": volume_name, "mountPath": mount_path}
+            )
+
+        pod_spec.setdefault("volumes", []).append(
+            {
+                "name": volume_name,
+                "persistentVolumeClaim": {"claimName": claim_name},
+            }
+        )
+        pod_spec.setdefault("initContainers", []).append(
+            {
+                "name": f"fix-{volume_name}-permissions",
+                "image": "alpine:3.23.4",
+                "imagePullPolicy": "IfNotPresent",
+                "command": [
+                    "sh",
+                    "-c",
+                    f"mkdir -p {mount_path} && chown -R 65532:65532 {mount_path}",
+                ],
+                "resources": {},
+                "securityContext": {"allowPrivilegeEscalation": False},
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File",
+                "volumeMounts": [{"name": volume_name, "mountPath": mount_path}],
+            }
+        )
 
 
 def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]:
@@ -436,6 +506,16 @@ def generate_website(
                     pod_spec.setdefault("volumes", []).append(
                         {"name": secret_name, "secret": {"secretName": secret_name}}
                     )
+
+    if config.persistence:
+        k8s_name = _make_k8s_name(config.name)
+        pvcs = _make_persistent_volume_claims(k8s_name, config.persistence)
+        for pvc in pvcs:
+            pvc.setdefault("metadata", {})["namespace"] = config.namespace
+        docs.extend(pvcs)
+
+        for doc in docs:
+            _inject_persistence_mounts(doc, k8s_name, config.persistence)
 
     if config.custom_token_audience:
         for doc in docs:

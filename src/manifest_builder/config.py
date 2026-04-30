@@ -53,6 +53,7 @@ class WebsiteConfig:
         None  # mount paths for external secrets (e.g., ["/email-password"])
     )
     custom_token_audience: str | None = None
+    persistence: dict[str, str] | None = None  # mount path -> storage request size
     replicas: int = DEFAULT_REPLICA_COUNT  # number of deployment replicas
 
 
