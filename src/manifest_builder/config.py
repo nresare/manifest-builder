@@ -84,22 +84,6 @@ class CopyConfig:
 type ManifestConfig = ChartConfig | WebsiteConfig | SimpleConfig | CopyConfig
 
 
-@dataclass
-class ManifestConfigs:
-    """Application config handlers loaded from config.toml."""
-
-    handlers: "Sequence[ConfigHandler]"
-
-    def __len__(self) -> int:
-        return len(self.all_configs())
-
-    def all_configs(self) -> tuple[ManifestConfig, ...]:
-        """Return all configs for generic bookkeeping."""
-        return tuple(
-            config for handler in self.handlers for config in handler.iter_configs()
-        )
-
-
 def load_images(config_dir: Path) -> dict[str, str]:
     """
     Load container image definitions from images.toml in the config directory.
@@ -189,7 +173,7 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
 
 def load_configs(
     config_dir: Path, handlers: "Sequence[ConfigHandler]"
-) -> ManifestConfigs:
+) -> "Sequence[ConfigHandler]":
     """
     Load app configurations from config.toml in the config directory.
 
@@ -200,7 +184,7 @@ def load_configs(
         config_dir: Directory containing TOML configuration files
 
     Returns:
-        App config objects grouped by config type
+        Handlers populated with the config items they own
 
     Raises:
         FileNotFoundError: If config_dir or config.toml doesn't exist
@@ -236,13 +220,13 @@ def load_configs(
     for name in present_handler_names:
         handler_by_name[name].load_config(data[name], toml_file, data)
 
-    return ManifestConfigs(handlers=handlers)
+    return handlers
 
 
 def resolve_configs(
-    configs: ManifestConfigs,
+    handlers: "Sequence[ConfigHandler]",
     helmfile: Helmfile | None,
-) -> ManifestConfigs:
+) -> "Sequence[ConfigHandler]":
     """
     Resolve helmfile release references, filling in chart/repo/version.
 
@@ -250,18 +234,18 @@ def resolve_configs(
     unchanged.
 
     Args:
-        configs: App configs as parsed from TOML
+        handlers: Config handlers populated by load_configs()
         helmfile: Parsed releases.yaml, or None if not present
 
     Returns:
-        Configs with all release references resolved
+        Handlers with all release references resolved
 
     Raises:
         ValueError: If a release reference cannot be resolved
     """
-    for handler in configs.handlers:
+    for handler in handlers:
         handler.resolve(helmfile)
-    return configs
+    return handlers
 
 
 def validate_website_config(config: WebsiteConfig) -> None:

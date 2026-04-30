@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from manifest_builder.config import ManifestConfigs, WebsiteConfig
+from manifest_builder.config import WebsiteConfig
 from manifest_builder.generator import ManifestError, generate_manifests
 from manifest_builder.website import WebsiteConfigHandler, generate_website
 
@@ -154,7 +154,7 @@ def test_generate_manifests_with_website_config(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
 
     generate_manifests(
-        ManifestConfigs(handlers=[WebsiteConfigHandler([config])]),
+        [WebsiteConfigHandler([config])],
         output_dir,
         repo_root=tmp_path,
     )
@@ -176,7 +176,7 @@ def test_generate_manifests_removes_stale_website_files(tmp_path: Path) -> None:
 
     config = WebsiteConfig(name="zq.lu", namespace="web")
     generate_manifests(
-        ManifestConfigs(handlers=[WebsiteConfigHandler([config])]),
+        [WebsiteConfigHandler([config])],
         output_dir,
         repo_root=tmp_path,
     )
@@ -236,7 +236,7 @@ def test_generate_manifests_detects_output_file_conflicts(tmp_path: Path) -> Non
     ):
         with pytest.raises(ManifestError, match="Configuration conflict"):
             generate_manifests(
-                ManifestConfigs(handlers=[WebsiteConfigHandler([config1, config2])]),
+                [WebsiteConfigHandler([config1, config2])],
                 output_dir,
                 repo_root=tmp_path,
             )
