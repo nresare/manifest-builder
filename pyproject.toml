@@ -37,3 +37,8 @@ local_scheme = "node-and-date"
 
 [tool.ruff]
 exclude = ["src/manifest_builder/_version.py"]
+
+[[tool.uv.index]]
+name = "noa"
+url = "https://repo.noa.re"
+publish-url = "https://repo.noa.re/legacy/"
