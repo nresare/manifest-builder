@@ -2,16 +2,20 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Tests for git commit cleanup utilities."""
 
+import logging
 import os
 import subprocess
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from manifest_builder.git_utils import (
     _prepare_manifest_changes,
     _remove_namespace_only_directories,
     create_manifest_commit,
     get_manifest_diff,
+    is_git_checkout,
 )
 
 # Isolate test git invocations from the user's global config (e.g. commit.gpgsign).
@@ -51,9 +55,14 @@ def test_remove_namespace_only_directories_keeps_namespace_with_other_manifests(
     assert namespace_dir.exists()
 
 
+def test_is_git_checkout_returns_false_for_non_checkout(tmp_path: Path) -> None:
+    """Non-git directories are not valid commit output targets."""
+    assert not is_git_checkout(tmp_path)
+
+
 @mock.patch("manifest_builder.git_utils.subprocess.run")
 def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
-    mock_run: mock.Mock, tmp_path: Path
+    mock_run: mock.Mock, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Commit creation removes namespace-only directories before git add -A."""
     namespace_dir = tmp_path / "surreal3"
@@ -67,17 +76,19 @@ def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
         mock.Mock(stdout="", stderr=""),  # git commit
     ]
 
-    create_manifest_commit(
-        output_dir=tmp_path,
-        version="1.2.3",
-        config_commit="abc123",
-        generated_files={namespace_manifest},
-    )
+    with caplog.at_level(logging.INFO, logger="manifest_builder.git_utils"):
+        create_manifest_commit(
+            output_dir=tmp_path,
+            version="1.2.3",
+            config_commit="abc123",
+            generated_files={namespace_manifest},
+        )
 
     assert not namespace_dir.exists()
     assert mock_run.call_args_list[0].args[0] == ["git", "add", "-A"]
     assert mock_run.call_args_list[1].args[0] == ["git", "status", "--porcelain"]
     assert mock_run.call_args_list[2].args[0] == ["git", "commit", "-m", mock.ANY]
+    assert f"Created manifest commit in {tmp_path}" in caplog.messages
 
 
 @mock.patch("manifest_builder.git_utils.subprocess.run")

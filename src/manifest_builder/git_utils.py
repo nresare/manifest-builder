@@ -70,6 +70,32 @@ def get_git_commit(path: Path) -> str:
         raise RuntimeError(f"Failed to get git commit for {path}: {e.stderr}") from e
 
 
+def is_git_checkout(path: Path) -> bool:
+    """
+    Check whether a path is inside a git checkout.
+
+    Args:
+        path: Directory to check
+
+    Returns:
+        True if the directory is in a git checkout, False otherwise
+    """
+    if not path.is_dir():
+        return False
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip() == "true"
+    except subprocess.CalledProcessError:
+        return False
+
+
 def is_git_dirty(path: Path) -> bool:
     """
     Check if a git directory has uncommitted changes.
@@ -258,6 +284,7 @@ def create_manifest_commit(
             text=True,
             check=True,
         )
+        logger.info("Created manifest commit in %s", output_dir)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
             f"Failed to create git commit in {output_dir}: {e.stderr}"

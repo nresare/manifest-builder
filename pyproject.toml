@@ -1,7 +1,7 @@
 [project]
 name = "manifest-builder"
 dynamic = ["version"]
-description = "Generate materialized Kubernetes manifests from Helm charts"
+description = "Generate materialized Kubernetes manifests from configuration input"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -37,3 +37,8 @@ local_scheme = "node-and-date"
 
 [tool.ruff]
 exclude = ["src/manifest_builder/_version.py"]
+
+[[tool.uv.index]]
+name = "repo.noa.re"
+url = "https://repo.noa.re"
+publish-url = "https://repo.noa.re/legacy/"
