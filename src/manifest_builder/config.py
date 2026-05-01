@@ -58,6 +58,20 @@ class WebsiteConfig:
 
 
 @dataclass
+class SimpleConfig:
+    """Configuration for a simple deployment built from bundled YAML templates."""
+
+    name: str
+    namespace: str
+    image: str
+    args: str | list[str] | None = None
+    iam_role: str | None = None
+    config: dict[str, Path] | None = None  # container path -> resolved local path
+    variables: dict[str, TemplateValue] = field(default_factory=dict)
+    replicas: int = DEFAULT_REPLICA_COUNT  # number of deployment replicas
+
+
+@dataclass
 class CopyConfig:
     """Configuration for an app that copies existing manifests verbatim."""
 
@@ -67,7 +81,7 @@ class CopyConfig:
     config: dict[str, Path] | None = None  # container path -> resolved local path
 
 
-type ManifestConfig = ChartConfig | WebsiteConfig | CopyConfig
+type ManifestConfig = ChartConfig | WebsiteConfig | SimpleConfig | CopyConfig
 
 
 @dataclass
@@ -260,6 +274,16 @@ def validate_website_config(config: WebsiteConfig) -> None:
             )
 
 
+def validate_simple_config(config: SimpleConfig) -> None:
+    """Validate a simple app configuration."""
+    for container_path, local_path in (config.config or {}).items():
+        if not local_path.exists():
+            raise ValueError(
+                f"Config file not found for '{config.name}': {local_path} "
+                f"(mapped from {container_path})"
+            )
+
+
 def validate_copy_config(config: CopyConfig) -> None:
     """Validate a copy app configuration."""
     if not config.source.exists():
@@ -318,6 +342,8 @@ def validate_config(config: ManifestConfig, repo_root: Path) -> None:
     """
     if isinstance(config, WebsiteConfig):
         validate_website_config(config)
+    elif isinstance(config, SimpleConfig):
+        validate_simple_config(config)
     elif isinstance(config, CopyConfig):
         validate_copy_config(config)
     else:
