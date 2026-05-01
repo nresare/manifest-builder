@@ -18,7 +18,7 @@ def _read_yaml(path: Path) -> dict:
 def test_generate_simple_writes_deployment_from_bundled_template(
     tmp_path: Path,
 ) -> None:
-    """Simple generation creates only a Deployment when no config is specified."""
+    """Simple generation creates a Deployment and ClusterIP Service."""
     config = SimpleConfig(
         name="idcat",
         namespace="idcat",
@@ -27,7 +27,10 @@ def test_generate_simple_writes_deployment_from_bundled_template(
 
     paths = generate_simple(config, tmp_path / "output")
 
-    assert {path.name for path in paths} == {"deployment-idcat.yaml"}
+    assert {path.name for path in paths} == {
+        "deployment-idcat.yaml",
+        "service-idcat.yaml",
+    }
     deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
     assert deployment["kind"] == "Deployment"
     assert deployment["metadata"]["name"] == "idcat"
@@ -35,6 +38,16 @@ def test_generate_simple_writes_deployment_from_bundled_template(
     assert deployment["spec"]["template"]["spec"]["containers"][0]["image"] == (
         "registry.example.com/idcat:1.0"
     )
+
+    service = _read_yaml(tmp_path / "output" / "idcat" / "service-idcat.yaml")
+    assert service["kind"] == "Service"
+    assert service["metadata"]["name"] == "idcat"
+    assert service["metadata"]["namespace"] == "idcat"
+    assert service["spec"]["type"] == "ClusterIP"
+    assert service["spec"]["selector"] == {"app": "idcat"}
+    assert service["spec"]["ports"] == [
+        {"protocol": "TCP", "port": 80, "targetPort": 8080}
+    ]
 
 
 def test_generate_simple_writes_configmap_when_config_is_specified(
@@ -54,10 +67,11 @@ def test_generate_simple_writes_configmap_when_config_is_specified(
 
     assert {path.name for path in paths} == {
         "deployment-idcat.yaml",
+        "service-idcat.yaml",
         "configmap-idcat-config.yaml",
     }
     assert not any(
-        path.name.startswith(("certificate-", "gateway-", "httproute-", "service-"))
+        path.name.startswith(("certificate-", "gateway-", "httproute-"))
         for path in paths
     )
 
@@ -97,6 +111,7 @@ def test_generate_simple_writes_serviceaccount_when_iam_role_is_specified(
 
     assert {path.name for path in paths} == {
         "deployment-idcat.yaml",
+        "service-idcat.yaml",
         "serviceaccount-idcat.yaml",
     }
 
@@ -130,5 +145,6 @@ def test_generate_manifests_with_simple_config(tmp_path: Path) -> None:
 
     assert {path.name for path in paths} == {
         "deployment-idcat.yaml",
+        "service-idcat.yaml",
         "namespace-idcat.yaml",
     }
