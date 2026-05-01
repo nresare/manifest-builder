@@ -13,6 +13,7 @@ from manifest_builder.config import (
     CopyConfig,
     ManifestConfig,
     ManifestConfigs,
+    SimpleConfig,
     WebsiteConfig,
     load_configs,
     load_images,
@@ -23,6 +24,7 @@ from manifest_builder.config import (
 from manifest_builder.copy import CopyConfigHandler
 from manifest_builder.generator import HelmConfigHandler
 from manifest_builder.helmfile import Helmfile, HelmfileRelease, HelmfileRepository
+from manifest_builder.simple import SimpleConfigHandler
 from manifest_builder.website import WebsiteConfigHandler
 
 
@@ -38,9 +40,14 @@ def only_config(configs: ManifestConfigs) -> ManifestConfig:
 
 
 def config_handlers() -> list[
-    HelmConfigHandler | WebsiteConfigHandler | CopyConfigHandler
+    HelmConfigHandler | WebsiteConfigHandler | SimpleConfigHandler | CopyConfigHandler
 ]:
-    return [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
+    return [
+        HelmConfigHandler(),
+        WebsiteConfigHandler(),
+        SimpleConfigHandler(),
+        CopyConfigHandler(),
+    ]
 
 
 def load_test_configs(config_dir: Path) -> ManifestConfigs:
@@ -51,12 +58,14 @@ def manifest_configs(
     *,
     helm: list[ChartConfig] | None = None,
     websites: list[WebsiteConfig] | None = None,
+    simples: list[SimpleConfig] | None = None,
     copies: list[CopyConfig] | None = None,
 ) -> ManifestConfigs:
     return ManifestConfigs(
         handlers=[
             HelmConfigHandler(helm),
             WebsiteConfigHandler(websites),
+            SimpleConfigHandler(simples),
             CopyConfigHandler(copies),
         ]
     )
@@ -248,7 +257,7 @@ def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
         "config.toml",
         """\
         [metadata]
-        description = "this file has no [[helm]], [[website]], or [[copy]]"
+        description = "this file has no recognized config tables"
         """,
     )
     with pytest.raises(ValueError, match="No .*\\[\\[helm\\]\\].* entries found"):
@@ -291,21 +300,61 @@ def test_load_configs_without_handlers_raises(tmp_path: Path) -> None:
         load_configs(conf, [])
 
 
-def test_load_configs_simple_table_is_not_recognized(tmp_path: Path) -> None:
-    """The copy config item is named [[copy]], not [[simple]]."""
+def test_load_simple_config(tmp_path: Path) -> None:
+    """Simple config can omit name and use namespace as the generated name."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    (conf / "idcat").mkdir()
+    (conf / "idcat" / "myconfig.toml").write_text("[idcat]\nenabled = true\n")
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+
+        [[simple.config]]
+        "/config/myconfig.toml" = "idcat/myconfig.toml"
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.name == "idcat"
+    assert config.namespace == "idcat"
+    assert config.image == "example.com/idcat:1.0"
+    assert config.config == {"/config/myconfig.toml": conf / "idcat" / "myconfig.toml"}
+
+
+def test_load_simple_config_with_iam_role_and_variables(tmp_path: Path) -> None:
+    """Simple iam_role is parsed with the variables used during rendering."""
     conf = tmp_path / "conf"
     conf.mkdir()
     write_toml(
         conf,
         "config.toml",
         """\
+        [variables]
+        account_id = "123456789012"
+        cluster_name = "berries"
+
         [[simple]]
-        namespace = "acme-dns"
-        source = "manifests"
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        iam_role = "arn:aws:iam::{{account_id}}:role/{{cluster_name}}-idcat"
         """,
     )
-    with pytest.raises(ValueError, match="No .*\\[\\[helm\\]\\].* entries found"):
-        load_test_configs(conf)
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.iam_role == "arn:aws:iam::{{account_id}}:role/{{cluster_name}}-idcat"
+    assert config.variables == {
+        "account_id": "123456789012",
+        "cluster_name": "berries",
+    }
 
 
 def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:

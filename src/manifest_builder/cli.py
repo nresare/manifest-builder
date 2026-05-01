@@ -30,6 +30,7 @@ from manifest_builder.git_utils import (
 )
 from manifest_builder.helm import get_helm_version
 from manifest_builder.helmfile import load_helmfile
+from manifest_builder.simple import SimpleConfigHandler
 from manifest_builder.website import WebsiteConfigHandler
 
 
@@ -116,7 +117,12 @@ def main(
             click.echo(f"Loaded releases.yaml: {count} release{plural(count)}")
 
         # Load and resolve the configurations
-        handlers = [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
+        handlers = [
+            HelmConfigHandler(),
+            WebsiteConfigHandler(),
+            SimpleConfigHandler(),
+            CopyConfigHandler(),
+        ]
         configs = load_configs(config_dir, handlers)
         configs = resolve_configs(configs, helmfile_data)
 
