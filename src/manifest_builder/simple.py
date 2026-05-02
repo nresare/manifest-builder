@@ -129,19 +129,29 @@ def _parse_simple_config(
                 f"Missing required field '{required_field}' in {source_file}"
             )
 
-    iam_role = data.get("iam_role")
+    iam_role = data.get("iam-role")
     if iam_role is not None and not isinstance(iam_role, str):
-        raise ValueError(f"'iam_role' must be a string in {source_file}")
+        raise ValueError(f"'iam-role' must be a string in {source_file}")
+
+    k8s_role = data.get("k8s-role")
+    if k8s_role is not None and not isinstance(k8s_role, str):
+        raise ValueError(f"'k8s-role' must be a string in {source_file}")
 
     name = data.get("name", data["namespace"])
+    extra_resources = None
+    if "extra-resources" in data:
+        extra_resources = source_file.parent / data["extra-resources"]
+
     return SimpleConfig(
         name=name,
         namespace=data["namespace"],
         image=data["image"],
         args=data.get("args"),
         iam_role=iam_role,
+        k8s_role=k8s_role,
         config=_parse_config_files(data.get("config"), source_file),
         variables=variables.copy(),
+        extra_resources=extra_resources,
         replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
     )
 
@@ -208,14 +218,21 @@ def generate_simple(
         **config.variables,
         "name": config.name,
         "k8s_name": _make_k8s_name(config.name),
+        "namespace": config.namespace,
         "replicas": config.replicas,
     }
     context["image"] = config.image
     if config.args:
         context["args"] = config.args
+    if config.iam_role or config.k8s_role:
+        context["service_account"] = True
     if config.iam_role:
         context["iam_role"] = pystache.Renderer(missing_tags=MissingTags.strict).render(
             config.iam_role, context
+        )
+    if config.k8s_role:
+        context["k8s_role"] = pystache.Renderer(missing_tags=MissingTags.strict).render(
+            config.k8s_role, context
         )
 
     docs: list[dict] = []
@@ -232,6 +249,19 @@ def generate_simple(
         kind = doc.get("kind")
         if kind and kind not in CLUSTER_SCOPED_KINDS:
             doc.setdefault("metadata", {})["namespace"] = config.namespace
+
+    if config.extra_resources:
+        renderer = pystache.Renderer(missing_tags=MissingTags.strict)
+        for yaml_file in sorted(config.extra_resources.glob("*.yaml")):
+            rendered = renderer.render(yaml_file.read_text(), context)
+            for doc in yaml.safe_load_all(rendered):
+                if not doc:
+                    continue
+                kind = doc.get("kind")
+                if kind and kind not in CLUSTER_SCOPED_KINDS:
+                    if "namespace" not in doc.get("metadata", {}):
+                        doc.setdefault("metadata", {})["namespace"] = config.namespace
+                docs.append(doc)
 
     k8s_name = _make_k8s_name(config.name)
     _inject_configmaps(docs, config, k8s_name)
