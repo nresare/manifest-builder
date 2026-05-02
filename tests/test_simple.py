@@ -35,9 +35,9 @@ def test_generate_simple_writes_deployment_from_bundled_template(
     assert deployment["kind"] == "Deployment"
     assert deployment["metadata"]["name"] == "idcat"
     assert deployment["metadata"]["namespace"] == "idcat"
-    assert deployment["spec"]["template"]["spec"]["containers"][0]["image"] == (
-        "registry.example.com/idcat:1.0"
-    )
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    assert container["image"] == "registry.example.com/idcat:1.0"
+    assert container["ports"] == [{"name": "http", "containerPort": 8080}]
 
     service = _read_yaml(tmp_path / "output" / "idcat" / "service-idcat.yaml")
     assert service["kind"] == "Service"
@@ -46,7 +46,7 @@ def test_generate_simple_writes_deployment_from_bundled_template(
     assert service["spec"]["type"] == "ClusterIP"
     assert service["spec"]["selector"] == {"app": "idcat"}
     assert service["spec"]["ports"] == [
-        {"protocol": "TCP", "port": 80, "targetPort": 8080}
+        {"name": "http", "port": 80, "targetPort": "http"}
     ]
 
 
@@ -127,6 +127,92 @@ def test_generate_simple_writes_serviceaccount_when_iam_role_is_specified(
 
     deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
     assert deployment["spec"]["template"]["spec"]["serviceAccountName"] == "idcat"
+
+
+def test_generate_simple_writes_rolebinding_when_k8s_role_is_specified(
+    tmp_path: Path,
+) -> None:
+    """k8s_role creates a ServiceAccount and binds it to the named Role."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        k8s_role="{{role_name}}",
+        variables={"role_name": "idcat-reader"},
+    )
+
+    paths = generate_simple(config, tmp_path / "output")
+
+    assert {path.name for path in paths} == {
+        "deployment-idcat.yaml",
+        "service-idcat.yaml",
+        "serviceaccount-idcat.yaml",
+        "rolebinding-idcat-idcat-reader.yaml",
+    }
+
+    serviceaccount = _read_yaml(
+        tmp_path / "output" / "idcat" / "serviceaccount-idcat.yaml"
+    )
+    assert serviceaccount["kind"] == "ServiceAccount"
+    assert serviceaccount["metadata"]["name"] == "idcat"
+    assert serviceaccount["metadata"]["namespace"] == "idcat"
+    assert "annotations" not in serviceaccount["metadata"]
+
+    rolebinding = _read_yaml(
+        tmp_path / "output" / "idcat" / "rolebinding-idcat-idcat-reader.yaml"
+    )
+    assert rolebinding["kind"] == "RoleBinding"
+    assert rolebinding["metadata"]["name"] == "idcat-idcat-reader"
+    assert rolebinding["metadata"]["namespace"] == "idcat"
+    assert rolebinding["subjects"] == [
+        {"kind": "ServiceAccount", "name": "idcat", "namespace": "idcat"}
+    ]
+    assert rolebinding["roleRef"] == {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "idcat-reader",
+    }
+
+    deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
+    assert deployment["spec"]["template"]["spec"]["serviceAccountName"] == "idcat"
+
+
+def test_generate_simple_renders_extra_resources_with_variables(
+    tmp_path: Path,
+) -> None:
+    """Extra resource manifests are rendered and namespace defaults are applied."""
+    extra_dir = tmp_path / "extra"
+    extra_dir.mkdir()
+    (extra_dir / "configmap.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{k8s_name}}-settings\n"
+        "data:\n  domain: {{domain}}\n"
+    )
+    (extra_dir / "storageclass.yaml").write_text(
+        "apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n"
+        "  name: {{k8s_name}}-storage\nprovisioner: example.com/storage\n"
+    )
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        variables={"domain": "example.com"},
+        extra_resources=extra_dir,
+    )
+
+    paths = generate_simple(config, tmp_path / "output")
+
+    assert "configmap-idcat-settings.yaml" in {path.name for path in paths}
+    configmap = _read_yaml(
+        tmp_path / "output" / "idcat" / "configmap-idcat-settings.yaml"
+    )
+    assert configmap["metadata"]["namespace"] == "idcat"
+    assert configmap["data"]["domain"] == "example.com"
+
+    storageclass = _read_yaml(
+        tmp_path / "output" / "cluster" / "storageclass-idcat-storage.yaml"
+    )
+    assert storageclass["kind"] == "StorageClass"
+    assert "namespace" not in storageclass["metadata"]
 
 
 def test_generate_manifests_with_simple_config(tmp_path: Path) -> None:

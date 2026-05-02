@@ -14,12 +14,15 @@ spec:
       labels:
         app: {{k8s_name}}
     spec:
-{{#iam_role}}
+{{#service_account}}
       serviceAccountName: {{name}}
-{{/iam_role}}
+{{/service_account}}
       containers:
         - name: {{k8s_name}}
           image: {{image}}
+          ports:
+            - name: http
+              containerPort: 8080
 {{#args}}
           args:
 {{#args}}

@@ -66,8 +66,12 @@ class SimpleConfig:
     image: str
     args: str | list[str] | None = None
     iam_role: str | None = None
+    k8s_role: str | None = None
     config: dict[str, Path] | None = None  # container path -> resolved local path
     variables: dict[str, TemplateValue] = field(default_factory=dict)
+    extra_resources: Path | None = (
+        None  # directory with additional YAML resources to include
+    )
     replicas: int = DEFAULT_REPLICA_COUNT  # number of deployment replicas
 
 
@@ -265,6 +269,16 @@ def validate_simple_config(config: SimpleConfig) -> None:
             raise ValueError(
                 f"Config file not found for '{config.name}': {local_path} "
                 f"(mapped from {container_path})"
+            )
+
+    if config.extra_resources is not None:
+        if not config.extra_resources.exists():
+            raise ValueError(
+                f"Extra resources directory not found for '{config.name}': {config.extra_resources}"
+            )
+        if not config.extra_resources.is_dir():
+            raise ValueError(
+                f"Extra resources path is not a directory for '{config.name}': {config.extra_resources}"
             )
 
 

@@ -339,8 +339,31 @@ def test_load_simple_config(tmp_path: Path) -> None:
     assert config.config == {"/config/myconfig.toml": conf / "idcat" / "myconfig.toml"}
 
 
+def test_load_simple_config_with_extra_resources(tmp_path: Path) -> None:
+    """Simple config can specify a directory with extra YAML resources."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    resources_dir = conf / "resources"
+    resources_dir.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        extra-resources = "resources"
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.extra_resources == resources_dir
+
+
 def test_load_simple_config_with_iam_role_and_variables(tmp_path: Path) -> None:
-    """Simple iam_role is parsed with the variables used during rendering."""
+    """Simple iam-role is parsed with the variables used during rendering."""
     conf = tmp_path / "conf"
     conf.mkdir()
     write_toml(
@@ -354,7 +377,7 @@ def test_load_simple_config_with_iam_role_and_variables(tmp_path: Path) -> None:
         [[simple]]
         namespace = "idcat"
         image = "example.com/idcat:1.0"
-        iam_role = "arn:aws:iam::{{account_id}}:role/{{cluster_name}}-idcat"
+        iam-role = "arn:aws:iam::{{account_id}}:role/{{cluster_name}}-idcat"
         """,
     )
 
@@ -366,6 +389,27 @@ def test_load_simple_config_with_iam_role_and_variables(tmp_path: Path) -> None:
         "account_id": "123456789012",
         "cluster_name": "berries",
     }
+
+
+def test_load_simple_config_with_k8s_role(tmp_path: Path) -> None:
+    """Simple config can specify a Kubernetes Role to bind to its ServiceAccount."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        k8s-role = "idcat-reader"
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.k8s_role == "idcat-reader"
 
 
 def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:
@@ -1035,6 +1079,35 @@ def test_validate_config_chart_extra_resources_not_a_directory(tmp_path: Path) -
         version=None,
         values=[],
         release=None,
+        extra_resources=not_a_dir,
+    )
+    with pytest.raises(ValueError, match="Extra resources path is not a directory"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_config_simple_extra_resources_missing_directory(
+    tmp_path: Path,
+) -> None:
+    """Validation should fail if simple extra_resources directory doesn't exist."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="example.com/idcat:1.0",
+        extra_resources=tmp_path / "nonexistent",
+    )
+    with pytest.raises(ValueError, match="Extra resources directory not found"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_config_simple_extra_resources_not_a_directory(tmp_path: Path) -> None:
+    """Validation should fail if simple extra_resources path is not a directory."""
+    not_a_dir = tmp_path / "file.txt"
+    not_a_dir.write_text("content")
+
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="example.com/idcat:1.0",
         extra_resources=not_a_dir,
     )
     with pytest.raises(ValueError, match="Extra resources path is not a directory"):
