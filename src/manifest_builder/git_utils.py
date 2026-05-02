@@ -3,14 +3,10 @@
 """Git utilities for manifest generation and versioning."""
 
 import logging
-import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-MAX_DIFF_BYTES = 65536
 
 
 def _remove_namespace_only_directories(
@@ -152,74 +148,6 @@ def _prepare_manifest_changes(
         old_file.unlink()
 
     _remove_namespace_only_directories(output_dir, owned)
-
-
-def get_manifest_diff(
-    output_dir: Path,
-    generated_files: set[Path],
-    owned_namespaces: set[str] | None = None,
-) -> str:
-    """
-    Return a context diff for the manifest changes that would be committed.
-
-    Uses a temporary git index so added, modified, and deleted files are included
-    without changing the output repository's real staging area. If the diff is
-    larger than 65536 bytes, returns ``git diff --stat`` output instead.
-
-    Args:
-        output_dir: Directory to diff
-        generated_files: Set of file paths that were generated in this run
-        owned_namespaces: Namespaces owned by other services; their files are
-            preserved during the pre-diff cleanup.
-
-    Returns:
-        Unified context diff output, or an empty string if there are no changes
-
-    Raises:
-        RuntimeError: If git operations fail
-    """
-    try:
-        _prepare_manifest_changes(output_dir, generated_files, owned_namespaces)
-        with tempfile.TemporaryDirectory(prefix="manifest-builder-index-") as temp_dir:
-            env = {**os.environ, "GIT_INDEX_FILE": str(Path(temp_dir) / "index")}
-            subprocess.run(
-                ["git", "read-tree", "HEAD"],
-                cwd=output_dir,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            subprocess.run(
-                ["git", "add", "-A"],
-                cwd=output_dir,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            result = subprocess.run(
-                ["git", "diff", "--cached"],
-                cwd=output_dir,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            if len(result.stdout.encode()) > MAX_DIFF_BYTES:
-                result = subprocess.run(
-                    ["git", "diff", "--cached", "--stat"],
-                    cwd=output_dir,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-            return result.stdout
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Failed to generate git diff in {output_dir}: {e.stderr}"
-        ) from e
 
 
 def create_manifest_commit(
