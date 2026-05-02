@@ -162,6 +162,59 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
     assert config.values == []
 
 
+def test_load_chart_config_unknown_field_raises(tmp_path: Path) -> None:
+    """Unknown Helm fields should fail before generation."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        value = ["values.yaml"]
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown field in \[\[helm\]\]: 'value' on line 5",
+    ):
+        load_test_configs(conf_dir)
+
+
+def test_load_config_unknown_field_reports_correct_table_occurrence(
+    tmp_path: Path,
+) -> None:
+    """Unknown field line numbers should match the table occurrence that failed."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+
+        [[helm]]
+        namespace = "staging"
+        chart = "./charts/other"
+        name = "other"
+        value = ["values.yaml"]
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown field in \[\[helm\]\]: 'value' on line 10",
+    ):
+        load_test_configs(conf_dir)
+
+
 def test_variables_are_loaded_for_helm_configs(tmp_path: Path) -> None:
     """Top-level variables should be attached to helm configs from the same TOML file."""
     conf_dir = tmp_path / "conf"
@@ -271,7 +324,10 @@ def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
         description = "this file has no recognized config tables"
         """,
     )
-    with pytest.raises(ValueError, match="No .*\\[\\[helm\\]\\].* entries found"):
+    with pytest.raises(
+        ValueError,
+        match="Unknown top-level field: 'metadata' on line 1",
+    ):
         load_test_configs(conf)
 
 
@@ -289,7 +345,10 @@ def test_load_configs_no_registered_handler_tables(tmp_path: Path) -> None:
         name = "myapp"
         """,
     )
-    with pytest.raises(ValueError, match="No \\[\\[website\\]\\] entries found"):
+    with pytest.raises(
+        ValueError,
+        match="Unknown top-level field: 'helm' on line 1",
+    ):
         load_configs(conf, [WebsiteConfigHandler()])
 
 
@@ -410,6 +469,28 @@ def test_load_simple_config_with_k8s_role(tmp_path: Path) -> None:
     config = only_config(configs)
     assert isinstance(config, SimpleConfig)
     assert config.k8s_role == "idcat-reader"
+
+
+def test_load_simple_config_unknown_field_raises(tmp_path: Path) -> None:
+    """Unknown simple fields should fail before generation."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        iam_role = "typo"
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown field in \[\[simple\]\]: 'iam_role' on line 4",
+    ):
+        load_test_configs(conf)
 
 
 def test_load_configs_both_release_and_chart_raises(tmp_path: Path) -> None:
@@ -632,6 +713,28 @@ def test_load_website_config(tmp_path: Path) -> None:
     assert isinstance(config, WebsiteConfig)
     assert config.name == "my-website"
     assert config.namespace == "production"
+
+
+def test_load_website_config_unknown_field_raises(tmp_path: Path) -> None:
+    """Unknown website fields should fail before generation."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[website]]
+        name = "my-website"
+        namespace = "production"
+        external_secret = ["/password"]
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown field in \[\[website\]\]: 'external_secret' on line 4",
+    ):
+        load_test_configs(conf_dir)
 
 
 def test_load_website_config_missing_name_field(tmp_path: Path) -> None:
@@ -1185,6 +1288,27 @@ source = "manifests"
     assert config.namespace == "acme-dns"
     assert config.source == tmp_path / "manifests"
     assert config.config is None
+
+
+def test_load_copy_config_unknown_field_raises(tmp_path: Path) -> None:
+    """Unknown copy fields should fail before generation."""
+    (tmp_path / "manifests").mkdir()
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[copy]]
+namespace = "acme-dns"
+source = "manifests"
+sources = "other-manifests"
+""",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown field in \[\[copy\]\]: 'sources' on line 4",
+    ):
+        load_test_configs(tmp_path)
 
 
 def test_load_copy_config_name_defaults_to_namespace(tmp_path: Path) -> None:

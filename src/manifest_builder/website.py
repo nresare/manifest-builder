@@ -14,6 +14,7 @@ from manifest_builder.config import (
     DEFAULT_REPLICA_COUNT,
     ManifestConfig,
     WebsiteConfig,
+    validate_known_fields,
     validate_website_config,
 )
 from manifest_builder.generator import (
@@ -42,12 +43,12 @@ class WebsiteConfigHandler(ConfigHandler):
         if not isinstance(data, list):
             raise ValueError(f"'website' must be a list of tables in {source_file}")
 
-        for item in data:
+        for index, item in enumerate(data):
             if not isinstance(item, dict):
                 raise ValueError(
                     f"Each [[website]] entry must be a table in {source_file}"
                 )
-            self.configs.append(_parse_website_config(item, source_file))
+            self.configs.append(_parse_website_config(item, source_file, index))
 
     def iter_configs(self) -> list[WebsiteConfig]:
         return self.configs
@@ -76,8 +77,30 @@ class WebsiteConfigHandler(ConfigHandler):
         )
 
 
-def _parse_website_config(data: dict, source_file: Path) -> WebsiteConfig:
+def _parse_website_config(
+    data: dict, source_file: Path, table_index: int = 0
+) -> WebsiteConfig:
     """Parse a website app configuration from TOML data."""
+    validate_known_fields(
+        "[[website]]",
+        data,
+        {
+            "name",
+            "namespace",
+            "hugo-repo",
+            "image",
+            "args",
+            "config",
+            "extra-hostnames",
+            "external-secrets",
+            "custom-token-audience",
+            "persistence",
+            "replicas",
+        },
+        source_file,
+        table_index,
+    )
+
     for required_field in ("name", "namespace"):
         if required_field not in data:
             raise ValueError(
