@@ -3,6 +3,7 @@
 """Configuration parsing and validation for manifest-builder."""
 
 import tomllib
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,6 +17,114 @@ if TYPE_CHECKING:
 
 DEFAULT_REPLICA_COUNT = 2
 TemplateValue = str | int | float | bool
+
+
+def validate_known_fields(
+    table_name: str,
+    data: dict,
+    allowed_fields: Collection[str],
+    source_file: Path,
+    table_index: int = 0,
+) -> None:
+    """Raise if a parsed TOML table contains fields the parser does not know."""
+    unknown = sorted(set(data) - set(allowed_fields))
+    if not unknown:
+        return
+
+    fields = ", ".join(
+        _format_field_location(field, source_file, table_name, table_index)
+        for field in unknown
+    )
+    suffix = "s" if len(unknown) != 1 else ""
+    raise ValueError(
+        f"Unknown field{suffix} in {table_name}: {fields} in {source_file}"
+    )
+
+
+def _format_field_location(
+    field: str,
+    source_file: Path,
+    table_name: str | None = None,
+    table_index: int = 0,
+) -> str:
+    line_number = _find_field_line(source_file, field, table_name, table_index)
+    if line_number is None:
+        return repr(field)
+    return f"{field!r} on line {line_number}"
+
+
+def _find_field_line(
+    source_file: Path,
+    field: str,
+    table_name: str | None = None,
+    table_index: int = 0,
+) -> int | None:
+    lines = source_file.read_text().splitlines()
+    if table_name is None:
+        return _find_top_level_field_line(lines, field)
+
+    in_table = False
+    current_index = -1
+    for line_number, line in enumerate(lines, start=1):
+        stripped = _strip_toml_comment(line).strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if stripped == table_name:
+                current_index += 1
+                in_table = current_index == table_index
+                continue
+            if in_table:
+                return None
+            continue
+        if in_table and _line_defines_toml_key(stripped, field):
+            return line_number
+
+    return None
+
+
+def _find_top_level_field_line(lines: list[str], field: str) -> int | None:
+    in_table = False
+    for line_number, line in enumerate(lines, start=1):
+        stripped = _strip_toml_comment(line).strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if stripped in {f"[{field}]", f"[[{field}]]"}:
+                return line_number
+            in_table = True
+            continue
+        if not in_table and _line_defines_toml_key(stripped, field):
+            return line_number
+    return None
+
+
+def _strip_toml_comment(line: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote == '"':
+            escaped = True
+            continue
+        if char in {'"', "'"}:
+            if quote is None:
+                quote = char
+            elif quote == char:
+                quote = None
+            continue
+        if char == "#" and quote is None:
+            return line[:index]
+    return line
+
+
+def _line_defines_toml_key(stripped_line: str, field: str) -> bool:
+    if "=" not in stripped_line:
+        return False
+    key = stripped_line.split("=", 1)[0].strip()
+    return key == field
 
 
 @dataclass
@@ -215,6 +324,15 @@ def load_configs(
         handler_by_name[name] = handler
     if not handler_by_name:
         raise ValueError("No config handlers registered")
+
+    allowed_top_level = set(handler_by_name) | {"variables"}
+    unknown_top_level = sorted(set(data) - allowed_top_level)
+    if unknown_top_level:
+        fields = ", ".join(
+            _format_field_location(field, toml_file) for field in unknown_top_level
+        )
+        suffix = "s" if len(unknown_top_level) != 1 else ""
+        raise ValueError(f"Unknown top-level field{suffix}: {fields} in {toml_file}")
 
     present_handler_names = sorted(name for name in handler_by_name if name in data)
     if not present_handler_names:

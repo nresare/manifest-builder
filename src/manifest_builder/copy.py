@@ -13,6 +13,7 @@ from pystache.common import MissingTags
 from manifest_builder.config import (
     CopyConfig,
     ManifestConfig,
+    validate_known_fields,
     validate_copy_config,
 )
 from manifest_builder.generator import (
@@ -46,12 +47,12 @@ class CopyConfigHandler(ConfigHandler):
         if not isinstance(data, list):
             raise ValueError(f"'copy' must be a list of tables in {source_file}")
 
-        for item in data:
+        for index, item in enumerate(data):
             if not isinstance(item, dict):
                 raise ValueError(
                     f"Each [[copy]] entry must be a table in {source_file}"
                 )
-            self.configs.append(_parse_copy_config(item, source_file))
+            self.configs.append(_parse_copy_config(item, source_file, index))
 
     def iter_configs(self) -> list[CopyConfig]:
         return self.configs
@@ -71,8 +72,18 @@ class CopyConfigHandler(ConfigHandler):
         return generate_copy(config, context.output_dir, images=context.images)
 
 
-def _parse_copy_config(data: dict, source_file: Path) -> CopyConfig:
+def _parse_copy_config(
+    data: dict, source_file: Path, table_index: int = 0
+) -> CopyConfig:
     """Parse a copy app configuration from TOML data."""
+    validate_known_fields(
+        "[[copy]]",
+        data,
+        {"name", "namespace", "source", "config"},
+        source_file,
+        table_index,
+    )
+
     for required_field in ("namespace", "source"):
         if required_field not in data:
             raise ValueError(

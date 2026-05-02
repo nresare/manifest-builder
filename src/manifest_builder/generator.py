@@ -19,6 +19,7 @@ from manifest_builder.config import (
     ManifestConfig,
     TemplateValue,
     validate_chart_config,
+    validate_known_fields,
 )
 from manifest_builder.handlers import ConfigHandler, GenerationContext
 from manifest_builder.helm import ChartCacheStats, pull_chart, run_helm_template
@@ -61,12 +62,14 @@ class HelmConfigHandler(ConfigHandler):
             raise ValueError(f"'helm' must be a list of tables in {source_file}")
 
         variables = _parse_variables(root_config.get("variables"), source_file)
-        for item in data:
+        for index, item in enumerate(data):
             if not isinstance(item, dict):
                 raise ValueError(
                     f"Each [[helm]] entry must be a table in {source_file}"
                 )
-            self.configs.append(_parse_chart_config(item, source_file, variables))
+            self.configs.append(
+                _parse_chart_config(item, source_file, variables, index)
+            )
 
     def iter_configs(self) -> Sequence[ManifestConfig]:
         return self.configs
@@ -164,8 +167,27 @@ def _parse_chart_config(
     data: dict,
     source_file: Path,
     variables: dict[str, TemplateValue],
+    table_index: int = 0,
 ) -> ChartConfig:
     """Parse a single Helm chart configuration from TOML data."""
+    validate_known_fields(
+        "[[helm]]",
+        data,
+        {
+            "name",
+            "namespace",
+            "chart",
+            "release",
+            "repo",
+            "version",
+            "values",
+            "extra-resources",
+            "init",
+        },
+        source_file,
+        table_index,
+    )
+
     has_release = "release" in data
     has_chart = "chart" in data
 

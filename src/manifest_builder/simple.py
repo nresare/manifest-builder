@@ -13,6 +13,7 @@ from manifest_builder.config import (
     ManifestConfig,
     SimpleConfig,
     TemplateValue,
+    validate_known_fields,
     validate_simple_config,
 )
 from manifest_builder.generator import (
@@ -48,12 +49,14 @@ class SimpleConfigHandler(ConfigHandler):
             raise ValueError(f"'simple' must be a list of tables in {source_file}")
 
         variables = _parse_variables(root_config.get("variables"), source_file)
-        for item in data:
+        for index, item in enumerate(data):
             if not isinstance(item, dict):
                 raise ValueError(
                     f"Each [[simple]] entry must be a table in {source_file}"
                 )
-            self.configs.append(_parse_simple_config(item, source_file, variables))
+            self.configs.append(
+                _parse_simple_config(item, source_file, variables, index)
+            )
 
     def iter_configs(self) -> list[SimpleConfig]:
         return self.configs
@@ -121,8 +124,27 @@ def _parse_simple_config(
     data: dict,
     source_file: Path,
     variables: dict[str, TemplateValue],
+    table_index: int = 0,
 ) -> SimpleConfig:
     """Parse a simple app configuration from TOML data."""
+    validate_known_fields(
+        "[[simple]]",
+        data,
+        {
+            "name",
+            "namespace",
+            "image",
+            "args",
+            "iam-role",
+            "k8s-role",
+            "config",
+            "extra-resources",
+            "replicas",
+        },
+        source_file,
+        table_index,
+    )
+
     for required_field in ("namespace", "image"):
         if required_field not in data:
             raise ValueError(
