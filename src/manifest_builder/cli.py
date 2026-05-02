@@ -60,14 +60,19 @@ def _show_diff(
     helmfile_path = config / "releases.yaml"
     helmfile_data = load_helmfile(helmfile_path) if helmfile_path.exists() else None
 
-    handlers = [HelmConfigHandler(), WebsiteConfigHandler(), CopyConfigHandler()]
-    configs = load_configs(config, handlers)
-    configs = resolve_configs(configs, helmfile_data)
+    handlers = [
+        HelmConfigHandler(),
+        WebsiteConfigHandler(),
+        SimpleConfigHandler(),
+        CopyConfigHandler(),
+    ]
+    handlers = load_configs(config, handlers)
+    handlers = resolve_configs(handlers, helmfile_data)
     images = load_images(config)
     owned_namespaces = load_owned_namespaces(config)
 
     written_paths = generate_manifests(
-        configs=configs,
+        handlers=handlers,
         output_dir=output,
         repo_root=Path.cwd(),
         images=images,

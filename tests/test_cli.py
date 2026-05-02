@@ -129,7 +129,7 @@ def test_show_diff_returns_generated_manifest_diff(
     mock_load_images.assert_called_once_with(config)
     mock_load_owned_namespaces.assert_called_once_with(config)
     mock_generate_manifests.assert_called_once_with(
-        configs=["resolved"],
+        handlers=["resolved"],
         output_dir=output,
         repo_root=Path.cwd(),
         images={"app": "image"},
