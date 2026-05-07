@@ -90,6 +90,8 @@ def _parse_website_config(
             "hugo-repo",
             "image",
             "args",
+            "env",
+            "emptydir-path",
             "config",
             "extra-hostnames",
             "external-secrets",
@@ -127,12 +129,22 @@ def _parse_website_config(
     if external_secrets is not None and isinstance(external_secrets, str):
         external_secrets = [external_secrets]
 
+    env = data.get("env")
+    if env is not None:
+        _validate_env_config(env, source_file)
+
+    emptydir_path = data.get("emptydir-path")
+    if emptydir_path is not None:
+        _validate_absolute_mount_path("emptydir-path", emptydir_path, source_file)
+
     return WebsiteConfig(
         name=data["name"],
         namespace=data["namespace"],
         hugo_repo=hugo_repo,
         image=image,
         args=data.get("args"),
+        env=env,
+        emptydir_path=emptydir_path,
         config=config_dict,
         extra_hostnames=data.get("extra-hostnames"),
         external_secrets=external_secrets,
@@ -140,6 +152,36 @@ def _parse_website_config(
         persistence=data.get("persistence"),
         replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
     )
+
+
+def _validate_env_config(env: object, source_file: Path) -> None:
+    """Validate website env configuration parsed from TOML."""
+    if not isinstance(env, dict):
+        raise ValueError(
+            f"'env' must be a table of string keys and values in {source_file}"
+        )
+    invalid = [
+        key
+        for key, value in env.items()
+        if not isinstance(key, str) or not isinstance(value, str)
+    ]
+    if invalid:
+        names = ", ".join(repr(key) for key in sorted(invalid))
+        raise ValueError(
+            f"'env' values must be strings in {source_file}; invalid keys: {names}"
+        )
+
+
+def _validate_absolute_mount_path(
+    field_name: str, mount_path: object, source_file: Path
+) -> None:
+    """Validate a configured Kubernetes mount path."""
+    if not isinstance(mount_path, str) or not mount_path.startswith("/"):
+        raise ValueError(
+            f"'{field_name}' must be an absolute path string in {source_file}"
+        )
+    if mount_path == "/":
+        raise ValueError(f"'{field_name}' cannot be '/' in {source_file}")
 
 
 def _load_fragments(templates_dir: Path, context: dict) -> dict[str, dict]:
@@ -196,6 +238,30 @@ def _persistent_volume_claim_name(k8s_name: str, mount_path: str) -> str:
     return f"{k8s_name}-{_secret_name_from_mount_path(mount_path)}"
 
 
+def _emptydir_volume_name(mount_path: str) -> str:
+    """Generate a volume name for an emptyDir mount."""
+    return f"emptydir-{_secret_name_from_mount_path(mount_path)}"
+
+
+def _permission_init_container(volume_name: str, mount_path: str) -> dict[str, object]:
+    """Build an init container that makes a mounted path writable by nonroot."""
+    return {
+        "name": f"fix-{volume_name}-permissions",
+        "image": "alpine:3.23.4",
+        "imagePullPolicy": "IfNotPresent",
+        "command": [
+            "sh",
+            "-c",
+            f"mkdir -p {mount_path} && chown -R 65532:65532 {mount_path}",
+        ],
+        "resources": {},
+        "securityContext": {"allowPrivilegeEscalation": False},
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [{"name": volume_name, "mountPath": mount_path}],
+    }
+
+
 def _make_persistent_volume_claims(
     k8s_name: str, persistence: dict[str, str]
 ) -> list[dict]:
@@ -242,22 +308,35 @@ def _inject_persistence_mounts(
             }
         )
         pod_spec.setdefault("initContainers", []).append(
-            {
-                "name": f"fix-{volume_name}-permissions",
-                "image": "alpine:3.23.4",
-                "imagePullPolicy": "IfNotPresent",
-                "command": [
-                    "sh",
-                    "-c",
-                    f"mkdir -p {mount_path} && chown -R 65532:65532 {mount_path}",
-                ],
-                "resources": {},
-                "securityContext": {"allowPrivilegeEscalation": False},
-                "terminationMessagePath": "/dev/termination-log",
-                "terminationMessagePolicy": "File",
-                "volumeMounts": [{"name": volume_name, "mountPath": mount_path}],
-            }
+            _permission_init_container(volume_name, mount_path)
         )
+
+
+def _inject_emptydir_mount(doc: dict, mount_path: str) -> None:
+    """Inject an emptyDir volume, main-container mount, and permission fixer."""
+    if doc.get("kind") != "Deployment":
+        return
+
+    pod_spec = (
+        doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    )
+    volume_name = _emptydir_volume_name(mount_path)
+
+    containers = pod_spec.get("containers", [])
+    if containers:
+        containers[0].setdefault("volumeMounts", []).append(
+            {"name": volume_name, "mountPath": mount_path}
+        )
+
+    pod_spec.setdefault("volumes", []).append(
+        {
+            "name": volume_name,
+            "emptyDir": {},
+        }
+    )
+    pod_spec.setdefault("initContainers", []).append(
+        _permission_init_container(volume_name, mount_path)
+    )
 
 
 def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]:
@@ -352,6 +431,23 @@ def _inject_custom_token_projection(doc: dict, audience: str) -> None:
             },
         }
     )
+
+
+def _make_env_vars(env: dict[str, str]) -> list[dict[str, str]]:
+    """Build Kubernetes EnvVar objects from configured environment variables."""
+    return [{"name": name, "value": value} for name, value in sorted(env.items())]
+
+
+def _inject_env_vars(doc: dict, env: dict[str, str]) -> None:
+    """Inject configured environment variables into all Deployment containers."""
+    if doc.get("kind") != "Deployment":
+        return
+
+    pod_spec = (
+        doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    )
+    for container in pod_spec.get("containers", []):
+        container.setdefault("env", []).extend(_make_env_vars(env))
 
 
 def generate_website(
@@ -469,6 +565,10 @@ def generate_website(
                     config.hugo_repo
                 )
 
+    if config.env:
+        for doc in docs:
+            _inject_env_vars(doc, config.env)
+
     # Generate ConfigMaps from config files and inject volumes/mounts if configured
     if config.config:
         k8s_name = _make_k8s_name(config.name)
@@ -539,6 +639,10 @@ def generate_website(
 
         for doc in docs:
             _inject_persistence_mounts(doc, k8s_name, config.persistence)
+
+    if config.emptydir_path:
+        for doc in docs:
+            _inject_emptydir_mount(doc, config.emptydir_path)
 
     if config.custom_token_audience:
         for doc in docs:

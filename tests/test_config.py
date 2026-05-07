@@ -836,6 +836,54 @@ def test_load_website_config_with_args_list(tmp_path: Path) -> None:
     assert config.args == ["--flag1=value1", "--flag2=value2"]
 
 
+def test_load_website_config_with_env(tmp_path: Path) -> None:
+    """Website config can specify container environment variables."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[website]]
+        name = "my-website"
+        namespace = "production"
+
+        [website.env]
+        LOG_LEVEL = "debug"
+        PUBLIC_URL = "https://example.com"
+        """,
+    )
+
+    configs = load_test_configs(conf_dir)
+    config = only_config(configs)
+    assert isinstance(config, WebsiteConfig)
+    assert config.env == {
+        "LOG_LEVEL": "debug",
+        "PUBLIC_URL": "https://example.com",
+    }
+
+
+def test_load_website_config_env_value_must_be_string(tmp_path: Path) -> None:
+    """Website env values must be strings."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[website]]
+        name = "my-website"
+        namespace = "production"
+
+        [website.env]
+        DEBUG = true
+        """,
+    )
+
+    with pytest.raises(ValueError, match="'env' values must be strings"):
+        load_test_configs(conf_dir)
+
+
 def test_load_website_config_hugo_repo_and_image_mutually_exclusive(
     tmp_path: Path,
 ) -> None:
@@ -956,6 +1004,46 @@ persistence = { "/data" = "1Gi" }
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.persistence == {"/data": "1Gi"}
+
+
+def test_load_website_config_with_emptydir_path(tmp_path: Path) -> None:
+    """Website config can specify an ephemeral writable emptyDir mount path."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+emptydir-path = "/cache"
+""",
+    )
+
+    configs = load_test_configs(tmp_path)
+    config = only_config(configs)
+    assert isinstance(config, WebsiteConfig)
+    assert config.emptydir_path == "/cache"
+
+
+def test_load_website_config_emptydir_path_must_be_absolute(
+    tmp_path: Path,
+) -> None:
+    """Website emptydir-path must be an absolute container path."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+emptydir-path = "cache"
+""",
+    )
+
+    with pytest.raises(ValueError, match="'emptydir-path' must be an absolute path"):
+        load_test_configs(tmp_path)
 
 
 def test_validate_config_missing_config_file(tmp_path: Path) -> None:

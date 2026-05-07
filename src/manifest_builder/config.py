@@ -154,6 +154,8 @@ class WebsiteConfig:
     hugo_repo: str | None = None
     image: str | None = None
     args: str | list[str] | None = None
+    env: dict[str, str] | None = None  # environment variable name -> value
+    emptydir_path: str | None = None  # ephemeral writable mount path
     config: dict[str, Path] | None = None  # container path -> resolved local path
     extra_hostnames: str | list[str] | None = (
         None  # additional hostnames for certificates/listeners
