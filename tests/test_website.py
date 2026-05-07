@@ -1021,6 +1021,44 @@ def test_generate_website_bundled_template_no_args(tmp_path: Path) -> None:
     assert "args" not in container
 
 
+def test_generate_website_bundled_template_env(tmp_path: Path) -> None:
+    """Bundled template should emit configured environment variables."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        env={"PUBLIC_URL": "https://example.com", "LOG_LEVEL": "debug"},
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert container["env"] == [
+        {"name": "LOG_LEVEL", "value": "debug"},
+        {"name": "PUBLIC_URL", "value": "https://example.com"},
+    ]
+
+
+def test_generate_website_hugo_container_adds_configured_env(tmp_path: Path) -> None:
+    """Configured env should be appended to the Hugo container fragment."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        hugo_repo="https://github.com/user/repo",
+        env={"LOG_LEVEL": "debug"},
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert {"name": "SERVER_PORT", "value": "8080"} in container["env"]
+    assert {"name": "LOG_LEVEL", "value": "debug"} in container["env"]
+
+
 def test_generate_website_external_secrets_injects_volumes_and_mounts(
     tmp_path: Path,
 ) -> None:
@@ -1163,6 +1201,68 @@ def test_generate_website_persistence_adds_permission_init_container(
             "terminationMessagePath": "/dev/termination-log",
             "terminationMessagePolicy": "File",
             "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+        }
+    ]
+
+
+def test_generate_website_emptydir_path_adds_mount_and_volume(
+    tmp_path: Path,
+) -> None:
+    """emptydir-path should add an emptyDir mounted into the main container."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        emptydir_path="/cache",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    pod_spec = deployment_doc["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+    assert {
+        "name": "emptydir-cache",
+        "mountPath": "/cache",
+    } in container["volumeMounts"]
+    assert {
+        "name": "emptydir-cache",
+        "emptyDir": {},
+    } in pod_spec["volumes"]
+
+
+def test_generate_website_emptydir_path_adds_permission_init_container(
+    tmp_path: Path,
+) -> None:
+    """emptydir-path should add an initContainer that fixes mount permissions."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+        emptydir_path="/cache",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    init_containers = deployment_doc["spec"]["template"]["spec"]["initContainers"]
+    assert init_containers == [
+        {
+            "name": "fix-emptydir-cache-permissions",
+            "image": "alpine:3.23.4",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+                "sh",
+                "-c",
+                "mkdir -p /cache && chown -R 65532:65532 /cache",
+            ],
+            "resources": {},
+            "securityContext": {"allowPrivilegeEscalation": False},
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [{"name": "emptydir-cache", "mountPath": "/cache"}],
         }
     ]
 
