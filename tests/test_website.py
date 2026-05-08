@@ -1267,15 +1267,15 @@ def test_generate_website_emptydir_path_adds_permission_init_container(
     ]
 
 
-def test_generate_website_custom_token_audience_injects_projected_token(
+def test_generate_website_custom_token_audiences_inject_projected_tokens(
     tmp_path: Path,
 ) -> None:
-    """Custom token audience should inject a projected service account token."""
+    """Custom token audiences should inject projected service account tokens."""
     config = WebsiteConfig(
         name="my-app",
         namespace="production",
         image="nginx:latest",
-        custom_token_audience="vault",
+        custom_token_audiences=["vault", "api"],
     )
     paths = generate_website(config, tmp_path / "output")
 
@@ -1302,14 +1302,21 @@ def test_generate_website_custom_token_audience_injects_projected_token(
                 "expirationSeconds": 3600,
                 "audience": "vault",
             }
-        }
+        },
+        {
+            "serviceAccountToken": {
+                "path": "api",
+                "expirationSeconds": 3600,
+                "audience": "api",
+            }
+        },
     ]
 
 
-def test_generate_website_without_custom_token_audience_has_no_token_volume(
+def test_generate_website_without_custom_token_audiences_has_no_token_volume(
     tmp_path: Path,
 ) -> None:
-    """Deployment without custom token audience should not inject a token volume."""
+    """Deployment without custom token audiences should not inject a token volume."""
     config = WebsiteConfig(
         name="my-app",
         namespace="production",
