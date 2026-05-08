@@ -1135,8 +1135,8 @@ external-secrets = "/api-key"
     assert config.external_secrets == ["/api-key"]
 
 
-def test_load_website_config_with_custom_token_audience(tmp_path: Path) -> None:
-    """Website config can specify a custom audience for a projected token."""
+def test_load_website_config_with_custom_token_audiences(tmp_path: Path) -> None:
+    """Website config can specify custom audiences for projected tokens."""
     write_toml(
         tmp_path,
         "config.toml",
@@ -1145,14 +1145,37 @@ def test_load_website_config_with_custom_token_audience(tmp_path: Path) -> None:
 name = "my-app"
 namespace = "default"
 image = "nginx:latest"
-custom-token-audience = "vault"
+custom-token-audiences = ["vault", "api"]
 """,
     )
 
     configs = load_test_configs(tmp_path)
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
-    assert config.custom_token_audience == "vault"
+    assert config.custom_token_audiences == ["vault", "api"]
+
+
+def test_load_website_config_custom_token_audiences_must_be_list(
+    tmp_path: Path,
+) -> None:
+    """Website custom token audiences must be configured as a string list."""
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[website]]
+name = "my-app"
+namespace = "default"
+image = "nginx:latest"
+custom-token-audiences = "vault"
+""",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="'custom-token-audiences' must be a list of strings",
+    ):
+        load_test_configs(tmp_path)
 
 
 def test_load_website_config_with_replicas(tmp_path: Path) -> None:

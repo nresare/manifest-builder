@@ -95,7 +95,7 @@ def _parse_website_config(
             "config",
             "extra-hostnames",
             "external-secrets",
-            "custom-token-audience",
+            "custom-token-audiences",
             "persistence",
             "replicas",
         },
@@ -129,6 +129,15 @@ def _parse_website_config(
     if external_secrets is not None and isinstance(external_secrets, str):
         external_secrets = [external_secrets]
 
+    custom_token_audiences = data.get("custom-token-audiences")
+    if custom_token_audiences is not None and (
+        not isinstance(custom_token_audiences, list)
+        or not all(isinstance(audience, str) for audience in custom_token_audiences)
+    ):
+        raise ValueError(
+            f"'custom-token-audiences' must be a list of strings in {source_file}"
+        )
+
     env = data.get("env")
     if env is not None:
         _validate_env_config(env, source_file)
@@ -148,7 +157,7 @@ def _parse_website_config(
         config=config_dict,
         extra_hostnames=data.get("extra-hostnames"),
         external_secrets=external_secrets,
-        custom_token_audience=data.get("custom-token-audience"),
+        custom_token_audiences=custom_token_audiences,
         persistence=data.get("persistence"),
         replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
     )
@@ -397,7 +406,7 @@ def _config_checksum(configmaps: list[dict]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _inject_custom_token_projection(doc: dict, audience: str) -> None:
+def _inject_custom_token_projection(doc: dict, audiences: list[str]) -> None:
     """Inject a projected service account token volume into a Deployment."""
     if doc.get("kind") != "Deployment":
         return
@@ -427,6 +436,7 @@ def _inject_custom_token_projection(doc: dict, audience: str) -> None:
                             "audience": audience,
                         }
                     }
+                    for audience in audiences
                 ]
             },
         }
@@ -644,8 +654,8 @@ def generate_website(
         for doc in docs:
             _inject_emptydir_mount(doc, config.emptydir_path)
 
-    if config.custom_token_audience:
+    if config.custom_token_audiences:
         for doc in docs:
-            _inject_custom_token_projection(doc, config.custom_token_audience)
+            _inject_custom_token_projection(doc, config.custom_token_audiences)
 
     return _write_documents(docs, output_dir, config.namespace, config.name)
