@@ -215,6 +215,36 @@ def test_generate_simple_renders_extra_resources_with_variables(
     assert "namespace" not in storageclass["metadata"]
 
 
+def test_generate_simple_sets_arch_node_selector(tmp_path: Path) -> None:
+    """arch field renders kubernetes.io/arch nodeSelector in the Pod spec."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        arch="arm64",
+    )
+
+    generate_simple(config, tmp_path / "output")
+
+    deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
+    pod_spec = deployment["spec"]["template"]["spec"]
+    assert pod_spec["nodeSelector"] == {"kubernetes.io/arch": "arm64"}
+
+
+def test_generate_simple_omits_arch_node_selector_when_unset(tmp_path: Path) -> None:
+    """Without arch, no nodeSelector is added to the Pod spec."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+    )
+
+    generate_simple(config, tmp_path / "output")
+
+    deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
+    assert "nodeSelector" not in deployment["spec"]["template"]["spec"]
+
+
 def test_generate_manifests_with_simple_config(tmp_path: Path) -> None:
     """generate_manifests dispatches to simple generation."""
     config = SimpleConfig(

@@ -17,6 +17,10 @@ spec:
 {{#service_account}}
       serviceAccountName: {{name}}
 {{/service_account}}
+{{#arch}}
+      nodeSelector:
+        kubernetes.io/arch: {{.}}
+{{/arch}}
       containers:
         - name: {{k8s_name}}
           image: {{image}}
