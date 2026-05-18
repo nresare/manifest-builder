@@ -594,6 +594,45 @@ def test_load_simple_config_with_k8s_role(tmp_path: Path) -> None:
     assert config.k8s_role == "idcat-reader"
 
 
+def test_load_simple_config_with_arch(tmp_path: Path) -> None:
+    """Simple config can declare a node architecture for the Pod nodeSelector."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        arch = "arm64"
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.arch == "arm64"
+
+
+def test_load_simple_config_arch_must_be_string(tmp_path: Path) -> None:
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        arch = 64
+        """,
+    )
+
+    with pytest.raises(ValueError, match="'arch' must be a string"):
+        load_test_configs(conf)
+
+
 def test_load_simple_config_unknown_field_raises(tmp_path: Path) -> None:
     """Unknown simple fields should fail before generation."""
     conf = tmp_path / "conf"

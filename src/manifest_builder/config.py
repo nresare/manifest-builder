@@ -184,6 +184,7 @@ class SimpleConfig:
         None  # directory with additional YAML resources to include
     )
     replicas: int = DEFAULT_REPLICA_COUNT  # number of deployment replicas
+    arch: str | None = None  # node architecture (sets kubernetes.io/arch nodeSelector)
 
 
 @dataclass

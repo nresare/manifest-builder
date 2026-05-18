@@ -140,6 +140,7 @@ def _parse_simple_config(
             "config",
             "extra-resources",
             "replicas",
+            "arch",
         },
         source_file,
         table_index,
@@ -159,6 +160,10 @@ def _parse_simple_config(
     if k8s_role is not None and not isinstance(k8s_role, str):
         raise ValueError(f"'k8s-role' must be a string in {source_file}")
 
+    arch = data.get("arch")
+    if arch is not None and not isinstance(arch, str):
+        raise ValueError(f"'arch' must be a string in {source_file}")
+
     name = data.get("name", data["namespace"])
     extra_resources = None
     if "extra-resources" in data:
@@ -175,6 +180,7 @@ def _parse_simple_config(
         variables=variables.copy(),
         extra_resources=extra_resources,
         replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
+        arch=arch,
     )
 
 
@@ -246,6 +252,8 @@ def generate_simple(
     context["image"] = config.image
     if config.args:
         context["args"] = config.args
+    if config.arch:
+        context["arch"] = config.arch
     if config.iam_role or config.k8s_role:
         context["service_account"] = True
     if config.iam_role:
