@@ -17,6 +17,7 @@ from manifest_builder.config import (
     SimpleConfig,
     WebsiteConfig,
     load_configs,
+    load_extra_variables,
     load_images,
     load_owned_namespaces,
     resolve_configs,
@@ -213,6 +214,128 @@ def test_load_config_unknown_field_reports_correct_table_occurrence(
         match=r"Unknown field in \[\[helm\]\]: 'value' on line 10",
     ):
         load_test_configs(conf_dir)
+
+
+def test_extra_variables_are_merged_into_helm_configs(tmp_path: Path) -> None:
+    """Variables loaded from --vars-from are merged with config.toml variables."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [variables]
+        domain = "example.com"
+
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        """,
+    )
+
+    configs = load_configs(
+        conf_dir,
+        config_handlers(),
+        extra_variables={"cluster_name": "prod", "replica_count": 3},
+    )
+    config = only_config(configs)
+    assert isinstance(config, ChartConfig)
+    assert config.variables == {
+        "domain": "example.com",
+        "cluster_name": "prod",
+        "replica_count": 3,
+    }
+
+
+def test_extra_variables_without_config_variables(tmp_path: Path) -> None:
+    """extra_variables become the variable set when config.toml has none."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        """,
+    )
+
+    configs = load_configs(
+        conf_dir,
+        config_handlers(),
+        extra_variables={"cluster_name": "prod"},
+    )
+    config = only_config(configs)
+    assert isinstance(config, ChartConfig)
+    assert config.variables == {"cluster_name": "prod"}
+
+
+def test_extra_variables_conflict_raises(tmp_path: Path) -> None:
+    """Overlapping keys between config.toml and extra_variables raise ValueError."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [variables]
+        domain = "example.com"
+
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        """,
+    )
+
+    with pytest.raises(ValueError, match="'domain'"):
+        load_configs(
+            conf_dir,
+            config_handlers(),
+            extra_variables={"domain": "other.com"},
+        )
+
+
+def test_load_extra_variables_reads_top_level_keys(tmp_path: Path) -> None:
+    vars_file = tmp_path / "vars.toml"
+    vars_file.write_text(
+        textwrap.dedent(
+            """\
+            domain = "example.com"
+            replica_count = 3
+            use_tls = true
+            """
+        )
+    )
+
+    assert load_extra_variables(vars_file) == {
+        "domain": "example.com",
+        "replica_count": 3,
+        "use_tls": True,
+    }
+
+
+def test_load_extra_variables_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Variables file not found"):
+        load_extra_variables(tmp_path / "nope.toml")
+
+
+def test_load_extra_variables_rejects_nested_table(tmp_path: Path) -> None:
+    vars_file = tmp_path / "vars.toml"
+    vars_file.write_text(
+        textwrap.dedent(
+            """\
+            [nested]
+            foo = "bar"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="must be a string, number, or boolean"):
+        load_extra_variables(vars_file)
 
 
 def test_variables_are_loaded_for_helm_configs(tmp_path: Path) -> None:

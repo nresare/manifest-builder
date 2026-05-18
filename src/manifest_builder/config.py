@@ -286,8 +286,41 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
     return owned
 
 
+def load_extra_variables(path: Path) -> dict[str, TemplateValue]:
+    """Load template variables from a standalone TOML file with top-level keys.
+
+    The file is expected to declare each variable as a top-level key=value pair
+    (no ``[variables]`` table), since the whole file is dedicated to variables.
+
+    Args:
+        path: Path to the TOML file.
+
+    Returns:
+        Dict mapping variable names to their scalar values.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        ValueError: If the file contains nested tables or non-scalar values.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Variables file not found: {path}")
+
+    data = tomllib.loads(path.read_text())
+
+    variables: dict[str, TemplateValue] = {}
+    for key, value in data.items():
+        if not isinstance(value, str | int | float | bool):
+            raise ValueError(
+                f"Variable '{key}' in {path} must be a string, number, or boolean"
+            )
+        variables[key] = value
+    return variables
+
+
 def load_configs(
-    config_dir: Path, handlers: "Sequence[ConfigHandler]"
+    config_dir: Path,
+    handlers: "Sequence[ConfigHandler]",
+    extra_variables: dict[str, TemplateValue] | None = None,
 ) -> "Sequence[ConfigHandler]":
     """
     Load app configurations from config.toml in the config directory.
@@ -297,6 +330,10 @@ def load_configs(
 
     Args:
         config_dir: Directory containing TOML configuration files
+        handlers: Config handlers to populate
+        extra_variables: Additional template variables merged into the
+            ``[variables]`` table from config.toml. Keys that overlap with
+            ``[variables]`` in config.toml are rejected with ValueError.
 
     Returns:
         Handlers populated with the config items they own
@@ -317,6 +354,20 @@ def load_configs(
 
     with open(toml_file, "rb") as f:
         data = tomllib.load(f)
+
+    if extra_variables:
+        existing = data.get("variables", {})
+        if not isinstance(existing, dict):
+            raise ValueError(f"'variables' must be a table in {toml_file}")
+        overlap = sorted(set(existing) & set(extra_variables))
+        if overlap:
+            names = ", ".join(repr(name) for name in overlap)
+            suffix = "s" if len(overlap) != 1 else ""
+            raise ValueError(
+                f"Variable{suffix} {names} defined in both {toml_file} "
+                "and the --vars-from file"
+            )
+        data["variables"] = {**existing, **extra_variables}
 
     handler_by_name: dict[str, ConfigHandler] = {}
     for handler in handlers:

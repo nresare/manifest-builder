@@ -8,6 +8,7 @@ from pathlib import Path
 from manifest_builder import __version__
 from manifest_builder.config import (
     load_configs,
+    load_extra_variables,
     load_images,
     load_owned_namespaces,
     resolve_configs,
@@ -34,6 +35,7 @@ def generate(
     verbose: bool = False,
     create_commit: bool = False,
     allow_dirty_config: bool = False,
+    vars_from: Path | None = None,
 ) -> set[Path]:
     """Generate manifests from ``config`` into ``output``.
 
@@ -48,6 +50,9 @@ def generate(
         create_commit: If True, create a git commit in the output checkout.
         allow_dirty_config: If True, allow commit creation when the config
             checkout has local changes.
+        vars_from: Optional path to a TOML file of extra template variables,
+            merged into the ``[variables]`` table from config.toml. Resolved
+            relative to ``repo_root`` if it is not absolute.
 
     Returns:
         Set of manifest paths written during generation.
@@ -57,6 +62,9 @@ def generate(
 
     config = repo_root / config
     output = repo_root / output
+    extra_variables = (
+        load_extra_variables(repo_root / vars_from) if vars_from is not None else None
+    )
 
     if create_commit and not is_git_checkout(output):
         raise ValueError(
@@ -87,7 +95,7 @@ def generate(
         SimpleConfigHandler(),
         CopyConfigHandler(),
     ]
-    handlers = load_configs(config, handlers)
+    handlers = load_configs(config, handlers, extra_variables=extra_variables)
     handlers = resolve_configs(handlers, helmfile_data)
 
     if verbose:

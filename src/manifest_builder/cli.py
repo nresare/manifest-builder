@@ -50,12 +50,19 @@ logger = logging.getLogger(__name__)
     is_flag=True,
     help="Allow creation of commit even if config directory has local changes",
 )
+@click.option(
+    "--vars-from",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="TOML file with extra template variables to merge with [variables] in config.toml",
+)
 def main(
     config_dir: Path,
     output_dir: Path,
     verbose: bool,
     create_commit: bool,
     allow_dirty_config: bool,
+    vars_from: Path | None,
 ) -> None:
     """Generate Kubernetes manifests from configuration input."""
     setup_logging(verbose=verbose)
@@ -70,6 +77,7 @@ def main(
             verbose=verbose,
             create_commit=create_commit,
             allow_dirty_config=allow_dirty_config,
+            vars_from=vars_from,
         )
 
     except ManifestError as e:
