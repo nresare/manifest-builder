@@ -188,11 +188,12 @@ def _inject_configmaps(
     docs: list[dict],
     config: SimpleConfig,
     k8s_name: str,
+    context: dict[str, Any],
 ) -> None:
     if not config.config:
         return
 
-    configmaps = _make_configmaps(k8s_name, config.config)
+    configmaps = _make_configmaps(k8s_name, config.config, context)
     checksum = _config_checksum(configmaps)
     for cm in configmaps:
         cm.setdefault("metadata", {})["namespace"] = config.namespace
@@ -294,6 +295,6 @@ def generate_simple(
                 docs.append(doc)
 
     k8s_name = _make_k8s_name(config.name)
-    _inject_configmaps(docs, config, k8s_name)
+    _inject_configmaps(docs, config, k8s_name, context)
 
     return _write_documents(docs, output_dir, config.namespace, config.name)

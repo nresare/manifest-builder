@@ -348,16 +348,28 @@ def _inject_emptydir_mount(doc: dict, mount_path: str) -> None:
     )
 
 
-def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]:
+def _make_configmaps(
+    k8s_name: str,
+    config_files: dict[str, Path],
+    context: dict[str, Any] | None = None,
+) -> list[dict]:
     """Build ConfigMap objects grouped by the parent directory of each path.
 
     Args:
         k8s_name: Kubernetes-safe name for the website (used in ConfigMap names)
         config_files: Dict mapping container path -> resolved local file path
+        context: Optional Mustache context for rendering file contents
 
     Returns:
         List of ConfigMap dictionaries grouped by parent directory
     """
+    renderer = None
+    if context is not None:
+        import pystache
+        from pystache.common import MissingTags
+
+        renderer = pystache.Renderer(missing_tags=MissingTags.strict)
+
     groups: dict[str, dict[str, str]] = {}
     for container_path, local_path in config_files.items():
         path = Path(container_path)
@@ -369,7 +381,10 @@ def _make_configmaps(k8s_name: str, config_files: dict[str, Path]) -> list[dict]
                 f"Config file path must include a filename: {container_path}"
             )
         data_key = path.name
-        groups.setdefault(mount_path, {})[data_key] = local_path.read_text()
+        content = local_path.read_text()
+        if renderer is not None:
+            content = renderer.render(content, context)
+        groups.setdefault(mount_path, {})[data_key] = content
 
     return [
         {

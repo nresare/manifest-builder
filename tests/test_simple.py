@@ -4,7 +4,9 @@
 
 from pathlib import Path
 
+import pytest
 import yaml
+from pystache.context import KeyNotFoundError
 
 from manifest_builder.config import SimpleConfig
 from manifest_builder.generator import generate_manifests
@@ -93,6 +95,48 @@ def test_generate_simple_writes_configmap_when_config_is_specified(
     assert pod_spec["containers"][0]["volumeMounts"] == [
         {"name": "idcat-config", "mountPath": "/config"}
     ]
+
+
+def test_generate_simple_renders_config_file_with_variables(
+    tmp_path: Path,
+) -> None:
+    """Config files are rendered with the simple template context."""
+    config_file = tmp_path / "myconfig.toml"
+    config_file.write_text('[idcat]\ndomain = "{{domain}}"\nreplicas = {{replicas}}\n')
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        config={"/config/myconfig.toml": config_file},
+        variables={"domain": "example.com"},
+        replicas=3,
+    )
+
+    generate_simple(config, tmp_path / "output")
+
+    configmap = _read_yaml(
+        tmp_path / "output" / "idcat" / "configmap-idcat-config.yaml"
+    )
+    assert configmap["data"]["myconfig.toml"] == (
+        '[idcat]\ndomain = "example.com"\nreplicas = 3\n'
+    )
+
+
+def test_generate_simple_config_file_missing_variable_raises(
+    tmp_path: Path,
+) -> None:
+    """Missing variables in rendered config files fail instead of being blank."""
+    config_file = tmp_path / "myconfig.toml"
+    config_file.write_text('[idcat]\ndomain = "{{domain}}"\n')
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        config={"/config/myconfig.toml": config_file},
+    )
+
+    with pytest.raises(KeyNotFoundError):
+        generate_simple(config, tmp_path / "output")
 
 
 def test_generate_simple_writes_serviceaccount_when_iam_role_is_specified(
