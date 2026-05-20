@@ -436,6 +436,58 @@ def test_load_configs_missing_config_toml(tmp_path: Path) -> None:
         load_test_configs(conf)
 
 
+def test_load_configs_accepts_manifest_builder_toml(tmp_path: Path) -> None:
+    """The top-level config file can be named manifest-builder.toml."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "manifest-builder.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        """,
+    )
+
+    config = only_config(load_test_configs(conf))
+
+    assert isinstance(config, ChartConfig)
+    assert config.name == "myapp"
+
+
+def test_load_configs_prefers_config_toml(tmp_path: Path) -> None:
+    """Existing config.toml behavior is preserved when both names are present."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "from-config-toml"
+        """,
+    )
+    write_toml(
+        conf,
+        "manifest-builder.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "from-manifest-builder-toml"
+        """,
+    )
+
+    config = only_config(load_test_configs(conf))
+
+    assert isinstance(config, ChartConfig)
+    assert config.name == "from-config-toml"
+
+
 def test_load_configs_no_recognized_tables(tmp_path: Path) -> None:
     conf = tmp_path / "conf"
     conf.mkdir()

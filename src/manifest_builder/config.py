@@ -198,6 +198,7 @@ class CopyConfig:
 
 
 type ManifestConfig = ChartConfig | WebsiteConfig | SimpleConfig | CopyConfig
+CONFIG_FILE_NAMES = ("config.toml", "manifest-builder.toml")
 
 
 def load_images(config_dir: Path) -> dict[str, str]:
@@ -324,23 +325,24 @@ def load_configs(
     extra_variables: dict[str, TemplateValue] | None = None,
 ) -> "Sequence[ConfigHandler]":
     """
-    Load app configurations from config.toml in the config directory.
+    Load app configurations from the config directory.
 
-    The config.toml file may contain top-level tables owned by the supplied
-    config handlers.
+    The top-level TOML config file may be named ``config.toml`` or
+    ``manifest-builder.toml`` and may contain top-level tables owned by the
+    supplied config handlers.
 
     Args:
         config_dir: Directory containing TOML configuration files
         handlers: Config handlers to populate
         extra_variables: Additional template variables merged into the
-            ``[variables]`` table from config.toml. Keys that overlap with
-            ``[variables]`` in config.toml are rejected with ValueError.
+            ``[variables]`` table from the config file. Keys that overlap with
+            ``[variables]`` in the config file are rejected with ValueError.
 
     Returns:
         Handlers populated with the config items they own
 
     Raises:
-        FileNotFoundError: If config_dir or config.toml doesn't exist
+        FileNotFoundError: If config_dir or a top-level config file doesn't exist
         ValueError: If TOML is invalid or missing required fields
     """
     if not config_dir.exists():
@@ -349,9 +351,17 @@ def load_configs(
     if not config_dir.is_dir():
         raise ValueError(f"Configuration path is not a directory: {config_dir}")
 
-    toml_file = config_dir / "config.toml"
-    if not toml_file.exists():
-        raise FileNotFoundError(f"Configuration file not found: {toml_file}")
+    toml_file = next(
+        (
+            config_dir / name
+            for name in CONFIG_FILE_NAMES
+            if (config_dir / name).exists()
+        ),
+        None,
+    )
+    if toml_file is None:
+        expected = " or ".join(str(config_dir / name) for name in CONFIG_FILE_NAMES)
+        raise FileNotFoundError(f"Configuration file not found: {expected}")
 
     with open(toml_file, "rb") as f:
         data = tomllib.load(f)
