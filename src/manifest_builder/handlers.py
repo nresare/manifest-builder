@@ -40,6 +40,7 @@ class ConfigHandler(ABC):
         data: object,
         source_file: Path,
         root_config: dict[str, Any],
+        default_namespace: str | None = None,
     ) -> None:
         """Parse this handler's raw TOML subtree."""
 

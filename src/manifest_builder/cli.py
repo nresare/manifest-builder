@@ -56,6 +56,13 @@ logger = logging.getLogger(__name__)
     default=None,
     help="TOML file with extra template variables to merge with [variables] in config.toml",
 )
+@click.option(
+    "--namespace",
+    type=str,
+    default=None,
+    metavar="NAMESPACE",
+    help="Declare and generate only one namespace-owned output tree",
+)
 def main(
     config_dir: Path,
     output_dir: Path,
@@ -63,6 +70,7 @@ def main(
     create_commit: bool,
     allow_dirty_config: bool,
     vars_from: Path | None,
+    namespace: str | None,
 ) -> None:
     """Generate Kubernetes manifests from configuration input."""
     setup_logging(verbose=verbose)
@@ -78,6 +86,7 @@ def main(
             create_commit=create_commit,
             allow_dirty_config=allow_dirty_config,
             vars_from=vars_from,
+            namespace=namespace,
         )
 
     except ManifestError as e:

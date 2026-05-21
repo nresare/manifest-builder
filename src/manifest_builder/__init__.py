@@ -24,10 +24,21 @@ def generate(
     verbose: bool = False,
     create_commit: bool = False,
     allow_dirty_config: bool = False,
+    namespace: str | None = None,
 ) -> set[Path]:
     """Generate manifests from ``config`` into ``output``."""
     # Keep this wrapper lazy: api imports __version__ from this module.
     from manifest_builder.api import generate as api_generate
+
+    if namespace is None:
+        return api_generate(
+            config,
+            output,
+            repo_root,
+            verbose,
+            create_commit,
+            allow_dirty_config,
+        )
 
     return api_generate(
         config,
@@ -36,6 +47,7 @@ def generate(
         verbose,
         create_commit,
         allow_dirty_config,
+        namespace=namespace,
     )
 
 

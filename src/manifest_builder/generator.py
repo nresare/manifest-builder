@@ -57,6 +57,7 @@ class HelmConfigHandler(ConfigHandler):
         data: object,
         source_file: Path,
         root_config: dict[str, Any],
+        default_namespace: str | None = None,
     ) -> None:
         if not isinstance(data, list):
             raise ValueError(f"'helm' must be a list of tables in {source_file}")
@@ -68,7 +69,9 @@ class HelmConfigHandler(ConfigHandler):
                     f"Each [[helm]] entry must be a table in {source_file}"
                 )
             self.configs.append(
-                _parse_chart_config(item, source_file, variables, index)
+                _parse_chart_config(
+                    item, source_file, variables, index, default_namespace
+                )
             )
 
     def iter_configs(self) -> Sequence[ManifestConfig]:
@@ -168,6 +171,7 @@ def _parse_chart_config(
     source_file: Path,
     variables: dict[str, TemplateValue],
     table_index: int = 0,
+    default_namespace: str | None = None,
 ) -> ChartConfig:
     """Parse a single Helm chart configuration from TOML data."""
     validate_known_fields(
@@ -195,10 +199,11 @@ def _parse_chart_config(
         raise ValueError(f"Cannot specify both 'release' and 'chart' in {source_file}")
     if not has_release and not has_chart:
         raise ValueError(f"Must specify either 'release' or 'chart' in {source_file}")
-    if "namespace" not in data:
+    if "namespace" not in data and default_namespace is None:
         raise ValueError(f"Missing required field 'namespace' in {source_file}")
 
     config_dir = source_file.parent
+    namespace = data.get("namespace", default_namespace)
     values = [config_dir / v for v in data.get("values", [])]
 
     extra_resources = None
@@ -212,7 +217,7 @@ def _parse_chart_config(
     if has_release:
         return ChartConfig(
             name=data["release"],
-            namespace=data["namespace"],
+            namespace=namespace,
             chart=None,
             repo=None,
             version=None,
@@ -227,7 +232,7 @@ def _parse_chart_config(
         raise ValueError(f"Missing required field 'name' in {source_file}")
     return ChartConfig(
         name=data["name"],
-        namespace=data["namespace"],
+        namespace=namespace,
         chart=data["chart"],
         repo=data.get("repo"),
         version=data.get("version"),
@@ -741,6 +746,7 @@ def _ensure_namespaces(
             not ns_dir.is_dir()
             or ns_dir.name == "cluster"
             or ns_dir.name == "kube-system"
+            or ns_dir.name == "owners"
             or ns_dir.name in owned
         ):
             continue

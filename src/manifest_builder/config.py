@@ -323,6 +323,7 @@ def load_configs(
     config_dir: Path,
     handlers: "Sequence[ConfigHandler]",
     extra_variables: dict[str, TemplateValue] | None = None,
+    default_namespace: str | None = None,
 ) -> "Sequence[ConfigHandler]":
     """
     Load app configurations from the config directory.
@@ -337,6 +338,8 @@ def load_configs(
         extra_variables: Additional template variables merged into the
             ``[variables]`` table from the config file. Keys that overlap with
             ``[variables]`` in the config file are rejected with ValueError.
+        default_namespace: Namespace to use when a config entry omits its
+            ``namespace`` field.
 
     Returns:
         Handlers populated with the config items they own
@@ -404,7 +407,9 @@ def load_configs(
         raise ValueError(f"No {expected} entries found in {toml_file}")
 
     for name in present_handler_names:
-        handler_by_name[name].load_config(data[name], toml_file, data)
+        handler_by_name[name].load_config(
+            data[name], toml_file, data, default_namespace
+        )
 
     return handlers
 

@@ -44,6 +44,7 @@ class SimpleConfigHandler(ConfigHandler):
         data: object,
         source_file: Path,
         root_config: dict[str, Any],
+        default_namespace: str | None = None,
     ) -> None:
         if not isinstance(data, list):
             raise ValueError(f"'simple' must be a list of tables in {source_file}")
@@ -55,7 +56,9 @@ class SimpleConfigHandler(ConfigHandler):
                     f"Each [[simple]] entry must be a table in {source_file}"
                 )
             self.configs.append(
-                _parse_simple_config(item, source_file, variables, index)
+                _parse_simple_config(
+                    item, source_file, variables, index, default_namespace
+                )
             )
 
     def iter_configs(self) -> list[SimpleConfig]:
@@ -125,6 +128,7 @@ def _parse_simple_config(
     source_file: Path,
     variables: dict[str, TemplateValue],
     table_index: int = 0,
+    default_namespace: str | None = None,
 ) -> SimpleConfig:
     """Parse a simple app configuration from TOML data."""
     validate_known_fields(
@@ -146,7 +150,10 @@ def _parse_simple_config(
         table_index,
     )
 
-    for required_field in ("namespace", "image"):
+    if "namespace" not in data and default_namespace is None:
+        raise ValueError(f"Missing required field 'namespace' in {source_file}")
+
+    for required_field in ("image",):
         if required_field not in data:
             raise ValueError(
                 f"Missing required field '{required_field}' in {source_file}"
@@ -164,14 +171,15 @@ def _parse_simple_config(
     if arch is not None and not isinstance(arch, str):
         raise ValueError(f"'arch' must be a string in {source_file}")
 
-    name = data.get("name", data["namespace"])
+    namespace = data.get("namespace", default_namespace)
+    name = data.get("name", namespace)
     extra_resources = None
     if "extra-resources" in data:
         extra_resources = source_file.parent / data["extra-resources"]
 
     return SimpleConfig(
         name=name,
-        namespace=data["namespace"],
+        namespace=namespace,
         image=data["image"],
         args=data.get("args"),
         iam_role=iam_role,
