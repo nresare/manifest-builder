@@ -4,6 +4,7 @@
 
 from pathlib import Path
 from unittest import mock
+from unittest.mock import call
 
 from manifest_builder import generate
 from manifest_builder.api import generate as api_generate
@@ -66,10 +67,15 @@ def test_generate_accepts_config_and_output_paths(
 
     assert result == {Path("/out/app.yaml")}
     mock_load_helmfile.assert_called_once_with(config / "releases.yaml")
-    mock_load_configs.assert_called_once()
+    mock_load_configs.assert_called_once_with(
+        config,
+        mock.ANY,
+        extra_variables=None,
+        default_namespace=None,
+    )
     mock_resolve_configs.assert_called_once_with(["loaded"], None)
     mock_load_images.assert_called_once_with(config)
-    mock_load_owned_namespaces.assert_called_once_with(config)
+    mock_load_owned_namespaces.assert_has_calls([call(config), call(output)])
     mock_generate_manifests.assert_called_once_with(
         handlers=["resolved"],
         output_dir=output,
@@ -78,6 +84,90 @@ def test_generate_accepts_config_and_output_paths(
         verbose=False,
         owned_namespaces={"owned"},
     )
+
+
+@mock.patch("manifest_builder.api.generate_manifests")
+@mock.patch("manifest_builder.api.load_owned_namespaces", return_value=set())
+@mock.patch("manifest_builder.api.load_images", return_value={})
+@mock.patch("manifest_builder.api.resolve_configs", return_value=["resolved"])
+@mock.patch("manifest_builder.api.load_configs", return_value=["loaded"])
+@mock.patch("manifest_builder.api.load_helmfile", return_value=None)
+def test_generate_namespace_mode_writes_owner_file(
+    mock_load_helmfile: mock.Mock,
+    mock_load_configs: mock.Mock,
+    mock_resolve_configs: mock.Mock,
+    mock_load_images: mock.Mock,
+    mock_load_owned_namespaces: mock.Mock,
+    mock_generate_manifests: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    """Namespace mode declares ownership in the output owners directory."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    mock_generate_manifests.return_value = {output / "team-a" / "deployment-app.yaml"}
+
+    result = api_generate(config, output, repo_root=tmp_path, namespace="team-a")
+
+    owner = output / "owners" / "team-a.toml"
+    assert owner in result
+    assert owner.read_text() == 'namespace = "team-a"\n'
+    mock_load_configs.assert_called_once_with(
+        config,
+        mock.ANY,
+        extra_variables=None,
+        default_namespace="team-a",
+    )
+    mock_load_owned_namespaces.assert_has_calls([call(config), call(output)])
+    mock_generate_manifests.assert_called_once_with(
+        handlers=["resolved"],
+        output_dir=output,
+        repo_root=tmp_path,
+        images={},
+        verbose=False,
+        owned_namespaces=set(),
+    )
+
+
+@mock.patch("manifest_builder.api.generate_manifests")
+@mock.patch("manifest_builder.api.load_owned_namespaces", return_value=set())
+@mock.patch("manifest_builder.api.load_images", return_value={})
+@mock.patch("manifest_builder.api.resolve_configs", return_value=["resolved"])
+@mock.patch("manifest_builder.api.load_configs", return_value=["loaded"])
+@mock.patch("manifest_builder.api.load_helmfile", return_value=None)
+def test_generate_namespace_mode_rejects_cluster_output(
+    mock_load_helmfile: mock.Mock,
+    mock_load_configs: mock.Mock,
+    mock_resolve_configs: mock.Mock,
+    mock_load_images: mock.Mock,
+    mock_load_owned_namespaces: mock.Mock,
+    mock_generate_manifests: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    """Namespace mode fails when any generated file lands in cluster/."""
+    del (
+        mock_load_helmfile,
+        mock_load_configs,
+        mock_resolve_configs,
+        mock_load_images,
+        mock_load_owned_namespaces,
+    )
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    mock_generate_manifests.return_value = {output / "cluster" / "clusterrole-app.yaml"}
+
+    try:
+        api_generate(config, output, repo_root=tmp_path, namespace="team-a")
+    except ValueError as e:
+        error = str(e)
+    else:
+        raise AssertionError("generate() should reject cluster output")
+
+    assert "--namespace mode cannot generate cluster-scoped manifests" in error
+    assert not (output / "owners" / "team-a.toml").exists()
 
 
 @mock.patch("manifest_builder.api.generate", return_value={Path("/out/app.yaml")})

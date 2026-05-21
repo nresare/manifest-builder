@@ -3,6 +3,7 @@
 """Public API for generating manifests."""
 
 import logging
+import json
 from pathlib import Path
 
 from manifest_builder import __version__
@@ -36,6 +37,7 @@ def generate(
     create_commit: bool = False,
     allow_dirty_config: bool = False,
     vars_from: Path | None = None,
+    namespace: str | None = None,
 ) -> set[Path]:
     """Generate manifests from ``config`` into ``output``.
 
@@ -53,6 +55,10 @@ def generate(
         vars_from: Optional path to a TOML file of extra template variables,
             merged into the ``[variables]`` table from config.toml. Resolved
             relative to ``repo_root`` if it is not absolute.
+        namespace: Optional namespace-owner mode. When set, config entries may
+            omit their ``namespace`` field, an owner declaration is written to
+            ``output/owners/<namespace>.toml``, and cluster-scoped output is
+            rejected.
 
     Returns:
         Set of manifest paths written during generation.
@@ -95,7 +101,12 @@ def generate(
         SimpleConfigHandler(),
         CopyConfigHandler(),
     ]
-    handlers = load_configs(config, handlers, extra_variables=extra_variables)
+    handlers = load_configs(
+        config,
+        handlers,
+        extra_variables=extra_variables,
+        default_namespace=namespace,
+    )
     handlers = resolve_configs(handlers, helmfile_data)
 
     if verbose:
@@ -103,7 +114,9 @@ def generate(
         logger.info("Loaded %d app configuration%s", count, plural(count))
 
     images = load_images(config)
-    owned_namespaces = load_owned_namespaces(config)
+    owned_namespaces = load_owned_namespaces(config) | load_owned_namespaces(output)
+    if namespace is not None:
+        owned_namespaces.discard(namespace)
     if verbose and owned_namespaces:
         count = len(owned_namespaces)
         logger.info(
@@ -122,6 +135,17 @@ def generate(
         owned_namespaces=owned_namespaces,
     )
 
+    if namespace is not None:
+        cluster_paths = _cluster_output_paths(output, written_paths)
+        if cluster_paths:
+            details = "\n  ".join(str(path) for path in cluster_paths)
+            raise ValueError(
+                "--namespace mode cannot generate cluster-scoped manifests:\n  "
+                f"{details}"
+            )
+        owner_path = _write_namespace_owner(output, namespace)
+        written_paths.add(owner_path)
+
     if create_commit:
         config_commit = get_git_commit(config)
         create_manifest_commit(
@@ -133,3 +157,25 @@ def generate(
         )
 
     return written_paths
+
+
+def _cluster_output_paths(output: Path, paths: set[Path]) -> list[Path]:
+    """Return generated paths that landed in the output cluster directory."""
+    cluster_paths: list[Path] = []
+    for path in paths:
+        try:
+            parts = path.relative_to(output).parts
+        except ValueError:
+            continue
+        if len(parts) > 1 and parts[0] == "cluster":
+            cluster_paths.append(path)
+    return sorted(cluster_paths)
+
+
+def _write_namespace_owner(output: Path, namespace: str) -> Path:
+    """Write this builder's namespace owner declaration."""
+    owner_dir = output / "owners"
+    owner_dir.mkdir(parents=True, exist_ok=True)
+    owner_path = owner_dir / f"{namespace}.toml"
+    owner_path.write_text(f"namespace = {json.dumps(namespace)}\n")
+    return owner_path

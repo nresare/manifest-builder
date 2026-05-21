@@ -43,6 +43,7 @@ class CopyConfigHandler(ConfigHandler):
         data: object,
         source_file: Path,
         root_config: dict[str, Any],
+        default_namespace: str | None = None,
     ) -> None:
         if not isinstance(data, list):
             raise ValueError(f"'copy' must be a list of tables in {source_file}")
@@ -52,7 +53,9 @@ class CopyConfigHandler(ConfigHandler):
                 raise ValueError(
                     f"Each [[copy]] entry must be a table in {source_file}"
                 )
-            self.configs.append(_parse_copy_config(item, source_file, index))
+            self.configs.append(
+                _parse_copy_config(item, source_file, index, default_namespace)
+            )
 
     def iter_configs(self) -> list[CopyConfig]:
         return self.configs
@@ -73,7 +76,10 @@ class CopyConfigHandler(ConfigHandler):
 
 
 def _parse_copy_config(
-    data: dict, source_file: Path, table_index: int = 0
+    data: dict,
+    source_file: Path,
+    table_index: int = 0,
+    default_namespace: str | None = None,
 ) -> CopyConfig:
     """Parse a copy app configuration from TOML data."""
     validate_known_fields(
@@ -84,14 +90,18 @@ def _parse_copy_config(
         table_index,
     )
 
-    for required_field in ("namespace", "source"):
+    required_fields = ["source"]
+    if default_namespace is None:
+        required_fields.append("namespace")
+    for required_field in required_fields:
         if required_field not in data:
             raise ValueError(
                 f"Missing required field '{required_field}' in {source_file}"
             )
 
     config_dir = source_file.parent
-    name = data.get("name", data["namespace"])
+    namespace = data.get("namespace", default_namespace)
+    name = data.get("name", namespace)
     source = config_dir / data["source"]
 
     config_dict = None
@@ -110,7 +120,7 @@ def _parse_copy_config(
 
     return CopyConfig(
         name=name,
-        namespace=data["namespace"],
+        namespace=namespace,
         source=source,
         config=config_dict,
     )

@@ -472,6 +472,18 @@ def test_ensure_namespaces_skips_cluster_directory(tmp_path: Path) -> None:
     assert new == {}
 
 
+def test_ensure_namespaces_skips_owners_directory(tmp_path: Path) -> None:
+    """The owners/ directory contains ownership TOML, not Kubernetes resources."""
+    owners_dir = tmp_path / "owners"
+    owners_dir.mkdir()
+    (owners_dir / "team-a.toml").write_text('namespace = "team-a"\n')
+
+    new = _ensure_namespaces(tmp_path, {})
+
+    assert new == {}
+    assert not (owners_dir / "namespace-owners.yaml").exists()
+
+
 def test_ensure_namespaces_skips_when_namespace_already_written(
     tmp_path: Path,
 ) -> None:

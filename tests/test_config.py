@@ -573,6 +573,26 @@ def test_load_simple_config(tmp_path: Path) -> None:
     assert config.config == {"/config/myconfig.toml": conf / "idcat" / "myconfig.toml"}
 
 
+def test_load_simple_config_uses_default_namespace(tmp_path: Path) -> None:
+    """Simple config can get its namespace from namespace-owner mode."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        image = "example.com/idcat:1.0"
+        """,
+    )
+
+    configs = load_configs(conf, config_handlers(), default_namespace="idcat")
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.name == "idcat"
+    assert config.namespace == "idcat"
+
+
 def test_load_simple_config_with_extra_resources(tmp_path: Path) -> None:
     """Simple config can specify a directory with extra YAML resources."""
     conf = tmp_path / "conf"

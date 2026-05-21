@@ -39,6 +39,7 @@ class WebsiteConfigHandler(ConfigHandler):
         data: object,
         source_file: Path,
         root_config: dict[str, Any],
+        default_namespace: str | None = None,
     ) -> None:
         if not isinstance(data, list):
             raise ValueError(f"'website' must be a list of tables in {source_file}")
@@ -48,7 +49,9 @@ class WebsiteConfigHandler(ConfigHandler):
                 raise ValueError(
                     f"Each [[website]] entry must be a table in {source_file}"
                 )
-            self.configs.append(_parse_website_config(item, source_file, index))
+            self.configs.append(
+                _parse_website_config(item, source_file, index, default_namespace)
+            )
 
     def iter_configs(self) -> list[WebsiteConfig]:
         return self.configs
@@ -78,7 +81,10 @@ class WebsiteConfigHandler(ConfigHandler):
 
 
 def _parse_website_config(
-    data: dict, source_file: Path, table_index: int = 0
+    data: dict,
+    source_file: Path,
+    table_index: int = 0,
+    default_namespace: str | None = None,
 ) -> WebsiteConfig:
     """Parse a website app configuration from TOML data."""
     validate_known_fields(
@@ -103,7 +109,10 @@ def _parse_website_config(
         table_index,
     )
 
-    for required_field in ("name", "namespace"):
+    required_fields = ["name"]
+    if default_namespace is None:
+        required_fields.append("namespace")
+    for required_field in required_fields:
         if required_field not in data:
             raise ValueError(
                 f"Missing required field '{required_field}' in {source_file}"
@@ -148,7 +157,7 @@ def _parse_website_config(
 
     return WebsiteConfig(
         name=data["name"],
-        namespace=data["namespace"],
+        namespace=data.get("namespace", default_namespace),
         hugo_repo=hugo_repo,
         image=image,
         args=data.get("args"),
