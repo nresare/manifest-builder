@@ -221,6 +221,53 @@ def test_generate_manifests_preserves_files_in_owned_namespace(tmp_path: Path) -
     assert owned_file not in written
 
 
+def test_generate_manifests_cleans_only_managed_namespaces(tmp_path: Path) -> None:
+    """Namespace-scoped generation must not remove files outside its namespace."""
+    output_dir = tmp_path / "out"
+    target_stale = output_dir / "team-a" / "configmap-old.yaml"
+    other_stale = output_dir / "team-b" / "configmap-other.yaml"
+    cluster_stale = output_dir / "cluster" / "clusterrole-other.yaml"
+    for path in (target_stale, other_stale, cluster_stale):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# stale\n")
+
+    chart_dir = tmp_path / "charts" / "my-chart-1.0" / "my-chart"
+    chart_dir.mkdir(parents=True)
+    config = ChartConfig(
+        name="my-chart",
+        namespace="team-a",
+        chart="my-chart",
+        repo="https://charts.example.com",
+        version="1.0",
+        values=[],
+        release=None,
+    )
+    manifest = """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fresh
+data: {}
+"""
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template", return_value=manifest
+    ):
+        written = generate_manifests(
+            [HelmConfigHandler([config])],
+            output_dir,
+            repo_root=tmp_path,
+            charts_dir=tmp_path / "charts",
+            managed_namespaces={"team-a"},
+        )
+
+    assert output_dir / "team-a" / "configmap-fresh.yaml" in written
+    assert not target_stale.exists()
+    assert other_stale.exists()
+    assert cluster_stale.exists()
+    assert not (output_dir / "team-b" / "namespace-team-b.yaml").exists()
+
+
 def test_generate_manifests_rejects_output_landing_in_owned_namespace(
     tmp_path: Path,
 ) -> None:

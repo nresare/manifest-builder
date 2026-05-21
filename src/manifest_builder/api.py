@@ -133,6 +133,7 @@ def generate(
         images=images,
         verbose=verbose,
         owned_namespaces=owned_namespaces,
+        managed_namespaces={namespace} if namespace is not None else None,
     )
 
     if namespace is not None:
@@ -148,12 +149,17 @@ def generate(
 
     if create_commit:
         config_commit = get_git_commit(config)
+        commit_owned_namespaces = owned_namespaces
+        if namespace is not None:
+            commit_owned_namespaces = owned_namespaces | _non_target_output_owners(
+                output, namespace
+            )
         create_manifest_commit(
             output,
             __version__,
             config_commit,
             written_paths,
-            owned_namespaces,
+            commit_owned_namespaces,
         )
 
     return written_paths
@@ -179,3 +185,14 @@ def _write_namespace_owner(output: Path, namespace: str) -> Path:
     owner_path = owner_dir / f"{namespace}.toml"
     owner_path.write_text(f"namespace = {json.dumps(namespace)}\n")
     return owner_path
+
+
+def _non_target_output_owners(output: Path, namespace: str) -> set[str]:
+    """Return top-level output directories that namespace mode must not clean."""
+    if not output.is_dir():
+        return set()
+    return {
+        path.name
+        for path in output.iterdir()
+        if path.is_dir() and path.name not in {namespace, "owners"}
+    }

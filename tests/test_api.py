@@ -83,6 +83,7 @@ def test_generate_accepts_config_and_output_paths(
         images={"app": "image"},
         verbose=False,
         owned_namespaces={"owned"},
+        managed_namespaces=None,
     )
 
 
@@ -127,6 +128,7 @@ def test_generate_namespace_mode_writes_owner_file(
         images={},
         verbose=False,
         owned_namespaces=set(),
+        managed_namespaces={"team-a"},
     )
 
 
@@ -168,6 +170,62 @@ def test_generate_namespace_mode_rejects_cluster_output(
 
     assert "--namespace mode cannot generate cluster-scoped manifests" in error
     assert not (output / "owners" / "team-a.toml").exists()
+
+
+@mock.patch("manifest_builder.api.create_manifest_commit")
+@mock.patch("manifest_builder.api.get_git_commit", return_value="abc123")
+@mock.patch("manifest_builder.api.is_git_dirty", return_value=False)
+@mock.patch("manifest_builder.api.is_git_checkout", return_value=True)
+@mock.patch("manifest_builder.api.generate_manifests")
+@mock.patch("manifest_builder.api.load_owned_namespaces", return_value=set())
+@mock.patch("manifest_builder.api.load_images", return_value={})
+@mock.patch("manifest_builder.api.resolve_configs", return_value=["resolved"])
+@mock.patch("manifest_builder.api.load_configs", return_value=["loaded"])
+@mock.patch("manifest_builder.api.load_helmfile", return_value=None)
+def test_namespace_mode_commit_preserves_non_target_directories(
+    mock_load_helmfile: mock.Mock,
+    mock_load_configs: mock.Mock,
+    mock_resolve_configs: mock.Mock,
+    mock_load_images: mock.Mock,
+    mock_load_owned_namespaces: mock.Mock,
+    mock_generate_manifests: mock.Mock,
+    mock_is_git_checkout: mock.Mock,
+    mock_is_git_dirty: mock.Mock,
+    mock_get_git_commit: mock.Mock,
+    mock_create_manifest_commit: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    """Commit cleanup also treats non-target output directories as protected."""
+    del (
+        mock_load_helmfile,
+        mock_load_configs,
+        mock_resolve_configs,
+        mock_load_images,
+        mock_load_owned_namespaces,
+        mock_is_git_checkout,
+        mock_is_git_dirty,
+        mock_get_git_commit,
+    )
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    (output / "team-a").mkdir(parents=True)
+    (output / "team-b").mkdir()
+    (output / "cluster").mkdir()
+    generated = output / "team-a" / "deployment-app.yaml"
+    mock_generate_manifests.return_value = {generated}
+
+    result = api_generate(
+        config,
+        output,
+        repo_root=tmp_path,
+        namespace="team-a",
+        create_commit=True,
+    )
+
+    assert generated in result
+    mock_create_manifest_commit.assert_called_once()
+    assert mock_create_manifest_commit.call_args.args[4] == {"team-b", "cluster"}
 
 
 @mock.patch("manifest_builder.api.generate", return_value={Path("/out/app.yaml")})
