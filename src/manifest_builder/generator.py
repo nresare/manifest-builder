@@ -579,6 +579,7 @@ def generate_manifests(
     charts_dir: Path | None = None,
     verbose: bool = False,
     owned_namespaces: set[str] | None = None,
+    managed_namespaces: set[str] | None = None,
 ) -> set[Path]:
     """
     Generate manifests for all configured apps.
@@ -593,6 +594,8 @@ def generate_manifests(
         owned_namespaces: Namespaces owned by other services/pipelines. Files
             in these namespace directories are not cleaned up, and generation
             fails if any output would land in one of them.
+        managed_namespaces: If set, cleanup and automatic Namespace creation are
+            limited to these namespace directories.
 
     Returns:
         Set of paths that were written
@@ -609,6 +612,7 @@ def generate_manifests(
         charts_dir = Path.home() / ".cache" / "manifest-builder"
 
     owned_namespaces = owned_namespaces or set()
+    managed_namespaces = managed_namespaces or None
     jobs = _collect_generation_jobs(handlers)
     if not jobs:
         logger.info("No configs configured")
@@ -686,11 +690,15 @@ def generate_manifests(
             )
 
     # Create Namespace objects for any namespace that lacks one
-    namespace_paths = _ensure_namespaces(output_dir, written_paths, owned_namespaces)
+    namespace_paths = _ensure_namespaces(
+        output_dir, written_paths, owned_namespaces, managed_namespaces
+    )
     written_paths.update(namespace_paths)
 
     # Remove any stale files left over from the previous runs
-    _cleanup_stale_files(output_dir, written_paths, owned_namespaces)
+    _cleanup_stale_files(
+        output_dir, written_paths, owned_namespaces, managed_namespaces
+    )
 
     if cache_stats.hits or cache_stats.misses:
         logger.info(
@@ -700,7 +708,9 @@ def generate_manifests(
 
     total = len(written_paths)
     summary = f"Done! Generated {total} manifest{plural(total)}"
-    removed = _count_removed_files(output_dir, written_paths, owned_namespaces)
+    removed = _count_removed_files(
+        output_dir, written_paths, owned_namespaces, managed_namespaces
+    )
     if removed:
         summary += f", removed {removed} stale file{plural(removed)}"
     logger.info(summary)
@@ -721,6 +731,7 @@ def _ensure_namespaces(
     output_dir: Path,
     written_paths: dict[Path, str],
     owned_namespaces: set[str] | None = None,
+    managed_namespaces: set[str] | None = None,
 ) -> dict[Path, str]:
     """Create Namespace objects for namespace directories that lack one.
 
@@ -732,6 +743,7 @@ def _ensure_namespaces(
         output_dir: Base output directory
         written_paths: Paths written so far in this run
         owned_namespaces: Namespaces owned by other services; skipped here
+        managed_namespaces: If set, only these namespaces get Namespace objects
 
     Returns:
         Dict of newly created namespace paths mapped to the source label
@@ -748,6 +760,9 @@ def _ensure_namespaces(
             or ns_dir.name == "kube-system"
             or ns_dir.name == "owners"
             or ns_dir.name in owned
+            or (
+                managed_namespaces is not None and ns_dir.name not in managed_namespaces
+            )
         ):
             continue
 
@@ -779,6 +794,7 @@ def _cleanup_stale_files(
     output_dir: Path,
     written_paths: dict[Path, str],
     owned_namespaces: set[str] | None = None,
+    managed_namespaces: set[str] | None = None,
 ) -> None:
     """Remove stale files and empty directories from previous runs.
 
@@ -787,13 +803,17 @@ def _cleanup_stale_files(
         written_paths: Set of paths that were written in this run
         owned_namespaces: Namespaces owned by other services; their files
             and directories are left untouched.
+        managed_namespaces: If set, only these namespace directories are cleaned.
     """
     if not output_dir.exists():
         return
 
     owned = owned_namespaces or set()
     for existing in output_dir.rglob("*.yaml"):
-        if _path_namespace(existing, output_dir) in owned:
+        namespace = _path_namespace(existing, output_dir)
+        if namespace in owned:
+            continue
+        if managed_namespaces is not None and namespace not in managed_namespaces:
             continue
         if existing not in written_paths:
             existing.unlink()
@@ -803,7 +823,10 @@ def _cleanup_stale_files(
     for directory in sorted(output_dir.rglob("*"), reverse=True):
         if not directory.is_dir():
             continue
-        if _path_namespace(directory, output_dir) in owned:
+        namespace = _path_namespace(directory, output_dir)
+        if namespace in owned:
+            continue
+        if managed_namespaces is not None and namespace not in managed_namespaces:
             continue
         if not any(directory.iterdir()):
             directory.rmdir()
@@ -813,6 +836,7 @@ def _count_removed_files(
     output_dir: Path,
     written_paths: dict[Path, str],
     owned_namespaces: set[str] | None = None,
+    managed_namespaces: set[str] | None = None,
 ) -> int:
     """Count the number of stale files that were removed.
 
@@ -820,6 +844,7 @@ def _count_removed_files(
         output_dir: Directory to check
         written_paths: Set of paths that were written in this run
         owned_namespaces: Namespaces owned by other services; not counted.
+        managed_namespaces: If set, only these namespace directories are counted.
 
     Returns:
         Number of removed files
@@ -830,7 +855,10 @@ def _count_removed_files(
     owned = owned_namespaces or set()
     removed = 0
     for existing in output_dir.rglob("*.yaml"):
-        if _path_namespace(existing, output_dir) in owned:
+        namespace = _path_namespace(existing, output_dir)
+        if namespace in owned:
+            continue
+        if managed_namespaces is not None and namespace not in managed_namespaces:
             continue
         if existing not in written_paths:
             removed += 1
