@@ -72,6 +72,7 @@ def test_generate_accepts_config_and_output_paths(
         mock.ANY,
         extra_variables=None,
         default_namespace=None,
+        default_image=None,
     )
     mock_resolve_configs.assert_called_once_with(["loaded"], None)
     mock_load_images.assert_called_once_with(config)
@@ -119,6 +120,7 @@ def test_generate_namespace_mode_writes_owner_file(
         mock.ANY,
         extra_variables=None,
         default_namespace="team-a",
+        default_image=None,
     )
     mock_load_owned_namespaces.assert_has_calls([call(config), call(output)])
     mock_generate_manifests.assert_called_once_with(
@@ -130,6 +132,68 @@ def test_generate_namespace_mode_writes_owner_file(
         owned_namespaces=set(),
         managed_namespaces={"team-a"},
     )
+
+
+@mock.patch("manifest_builder.api.generate_manifests")
+@mock.patch("manifest_builder.api.load_owned_namespaces", return_value=set())
+@mock.patch("manifest_builder.api.load_images", return_value={})
+@mock.patch("manifest_builder.api.resolve_configs", return_value=["resolved"])
+@mock.patch("manifest_builder.api.load_configs", return_value=["loaded"])
+@mock.patch("manifest_builder.api.load_helmfile", return_value=None)
+def test_generate_namespace_mode_passes_image_default(
+    mock_load_helmfile: mock.Mock,
+    mock_load_configs: mock.Mock,
+    mock_resolve_configs: mock.Mock,
+    mock_load_images: mock.Mock,
+    mock_load_owned_namespaces: mock.Mock,
+    mock_generate_manifests: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    """The API image parameter is passed as a namespace-mode config default."""
+    del (
+        mock_load_helmfile,
+        mock_resolve_configs,
+        mock_load_images,
+        mock_load_owned_namespaces,
+    )
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    mock_generate_manifests.return_value = {output / "team-a" / "deployment-app.yaml"}
+
+    api_generate(
+        config,
+        output,
+        repo_root=tmp_path,
+        namespace="team-a",
+        image="registry.example.com/app:1.0",
+    )
+
+    mock_load_configs.assert_called_once_with(
+        config,
+        mock.ANY,
+        extra_variables=None,
+        default_namespace="team-a",
+        default_image="registry.example.com/app:1.0",
+    )
+
+
+def test_generate_image_requires_namespace(tmp_path: Path) -> None:
+    """The API image parameter only has meaning in namespace mode."""
+    try:
+        api_generate(
+            tmp_path / "config",
+            tmp_path / "output",
+            repo_root=tmp_path,
+            image="registry.example.com/app:1.0",
+        )
+    except ValueError as e:
+        error = str(e)
+    else:
+        raise AssertionError("generate() should reject image without namespace")
+
+    assert error == "generate(image=...) can only be used when namespace is set"
 
 
 @mock.patch("manifest_builder.api.generate_manifests")
@@ -248,4 +312,28 @@ def test_top_level_generate_delegates_to_api(mock_generate: mock.Mock) -> None:
         True,
         True,
         True,
+    )
+
+
+@mock.patch("manifest_builder.api.generate", return_value={Path("/out/app.yaml")})
+def test_top_level_generate_passes_namespace_image(mock_generate: mock.Mock) -> None:
+    """The top-level convenience wrapper exposes the image override."""
+    result = generate(
+        Path("conf"),
+        Path("output"),
+        repo_root=Path("/repo"),
+        namespace="team-a",
+        image="registry.example.com/app:1.0",
+    )
+
+    assert result == {Path("/out/app.yaml")}
+    mock_generate.assert_called_once_with(
+        Path("conf"),
+        Path("output"),
+        Path("/repo"),
+        False,
+        False,
+        False,
+        namespace="team-a",
+        image="registry.example.com/app:1.0",
     )

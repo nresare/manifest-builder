@@ -38,6 +38,7 @@ def generate(
     allow_dirty_config: bool = False,
     vars_from: Path | None = None,
     namespace: str | None = None,
+    image: str | None = None,
 ) -> set[Path]:
     """Generate manifests from ``config`` into ``output``.
 
@@ -59,6 +60,9 @@ def generate(
             omit their ``namespace`` field, an owner declaration is written to
             ``output/owners/<namespace>.toml``, and cluster-scoped output is
             rejected.
+        image: Optional image override for namespace-owner mode. When set,
+            simple and website config entries use this image and must not also
+            set an ``image`` field in the config file.
 
     Returns:
         Set of manifest paths written during generation.
@@ -71,6 +75,9 @@ def generate(
     extra_variables = (
         load_extra_variables(repo_root / vars_from) if vars_from is not None else None
     )
+
+    if image is not None and namespace is None:
+        raise ValueError("generate(image=...) can only be used when namespace is set")
 
     if create_commit and not is_git_checkout(output):
         raise ValueError(
@@ -106,6 +113,7 @@ def generate(
         handlers,
         extra_variables=extra_variables,
         default_namespace=namespace,
+        default_image=image if namespace is not None else None,
     )
     handlers = resolve_configs(handlers, helmfile_data)
 

@@ -324,6 +324,7 @@ def load_configs(
     handlers: "Sequence[ConfigHandler]",
     extra_variables: dict[str, TemplateValue] | None = None,
     default_namespace: str | None = None,
+    default_image: str | None = None,
 ) -> "Sequence[ConfigHandler]":
     """
     Load app configurations from the config directory.
@@ -340,6 +341,8 @@ def load_configs(
             ``[variables]`` in the config file are rejected with ValueError.
         default_namespace: Namespace to use when a config entry omits its
             ``namespace`` field.
+        default_image: Image to use for namespace-mode simple and website
+            config entries that omit their ``image`` field.
 
     Returns:
         Handlers populated with the config items they own
@@ -408,7 +411,7 @@ def load_configs(
 
     for name in present_handler_names:
         handler_by_name[name].load_config(
-            data[name], toml_file, data, default_namespace
+            data[name], toml_file, data, default_namespace, default_image
         )
 
     return handlers
