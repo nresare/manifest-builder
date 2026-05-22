@@ -40,6 +40,7 @@ class WebsiteConfigHandler(ConfigHandler):
         source_file: Path,
         root_config: dict[str, Any],
         default_namespace: str | None = None,
+        default_image: str | None = None,
     ) -> None:
         if not isinstance(data, list):
             raise ValueError(f"'website' must be a list of tables in {source_file}")
@@ -50,7 +51,9 @@ class WebsiteConfigHandler(ConfigHandler):
                     f"Each [[website]] entry must be a table in {source_file}"
                 )
             self.configs.append(
-                _parse_website_config(item, source_file, index, default_namespace)
+                _parse_website_config(
+                    item, source_file, index, default_namespace, default_image
+                )
             )
 
     def iter_configs(self) -> list[WebsiteConfig]:
@@ -85,6 +88,7 @@ def _parse_website_config(
     source_file: Path,
     table_index: int = 0,
     default_namespace: str | None = None,
+    default_image: str | None = None,
 ) -> WebsiteConfig:
     """Parse a website app configuration from TOML data."""
     validate_known_fields(
@@ -120,6 +124,13 @@ def _parse_website_config(
 
     hugo_repo = data.get("hugo-repo")
     image = data.get("image")
+    if default_image is not None and image is not None:
+        raise ValueError(
+            f"Cannot specify 'image' in {source_file} when generate(image=...) is used"
+        )
+    if default_image is not None:
+        image = default_image
+        hugo_repo = None
 
     if hugo_repo and image:
         raise ValueError(

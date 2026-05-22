@@ -41,6 +41,7 @@ class ConfigHandler(ABC):
         source_file: Path,
         root_config: dict[str, Any],
         default_namespace: str | None = None,
+        default_image: str | None = None,
     ) -> None:
         """Parse this handler's raw TOML subtree."""
 

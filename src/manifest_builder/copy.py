@@ -44,7 +44,9 @@ class CopyConfigHandler(ConfigHandler):
         source_file: Path,
         root_config: dict[str, Any],
         default_namespace: str | None = None,
+        default_image: str | None = None,
     ) -> None:
+        del default_image
         if not isinstance(data, list):
             raise ValueError(f"'copy' must be a list of tables in {source_file}")
 

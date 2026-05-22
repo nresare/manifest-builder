@@ -45,6 +45,7 @@ class SimpleConfigHandler(ConfigHandler):
         source_file: Path,
         root_config: dict[str, Any],
         default_namespace: str | None = None,
+        default_image: str | None = None,
     ) -> None:
         if not isinstance(data, list):
             raise ValueError(f"'simple' must be a list of tables in {source_file}")
@@ -57,7 +58,12 @@ class SimpleConfigHandler(ConfigHandler):
                 )
             self.configs.append(
                 _parse_simple_config(
-                    item, source_file, variables, index, default_namespace
+                    item,
+                    source_file,
+                    variables,
+                    index,
+                    default_namespace,
+                    default_image,
                 )
             )
 
@@ -129,6 +135,7 @@ def _parse_simple_config(
     variables: dict[str, TemplateValue],
     table_index: int = 0,
     default_namespace: str | None = None,
+    default_image: str | None = None,
 ) -> SimpleConfig:
     """Parse a simple app configuration from TOML data."""
     validate_known_fields(
@@ -153,11 +160,12 @@ def _parse_simple_config(
     if "namespace" not in data and default_namespace is None:
         raise ValueError(f"Missing required field 'namespace' in {source_file}")
 
-    for required_field in ("image",):
-        if required_field not in data:
-            raise ValueError(
-                f"Missing required field '{required_field}' in {source_file}"
-            )
+    if default_image is not None and "image" in data:
+        raise ValueError(
+            f"Cannot specify 'image' in {source_file} when generate(image=...) is used"
+        )
+    if "image" not in data and default_image is None:
+        raise ValueError(f"Missing required field 'image' in {source_file}")
 
     iam_role = data.get("iam-role")
     if iam_role is not None and not isinstance(iam_role, str):
@@ -172,6 +180,7 @@ def _parse_simple_config(
         raise ValueError(f"'arch' must be a string in {source_file}")
 
     namespace = data.get("namespace", default_namespace)
+    image = data.get("image", default_image)
     name = data.get("name", namespace)
     extra_resources = None
     if "extra-resources" in data:
@@ -180,7 +189,7 @@ def _parse_simple_config(
     return SimpleConfig(
         name=name,
         namespace=namespace,
-        image=data["image"],
+        image=image,
         args=data.get("args"),
         iam_role=iam_role,
         k8s_role=k8s_role,

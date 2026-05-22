@@ -593,6 +593,52 @@ def test_load_simple_config_uses_default_namespace(tmp_path: Path) -> None:
     assert config.namespace == "idcat"
 
 
+def test_load_simple_config_uses_default_image(tmp_path: Path) -> None:
+    """Simple config can get its image from namespace-mode API input."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        """,
+    )
+
+    configs = load_configs(
+        conf,
+        config_handlers(),
+        default_namespace="idcat",
+        default_image="example.com/idcat:1.0",
+    )
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.namespace == "idcat"
+    assert config.image == "example.com/idcat:1.0"
+
+
+def test_load_simple_config_rejects_image_with_default_image(tmp_path: Path) -> None:
+    """Config image and API image override are mutually exclusive."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        image = "example.com/idcat:1.0"
+        """,
+    )
+
+    with pytest.raises(ValueError, match="Cannot specify 'image'.*generate"):
+        load_configs(
+            conf,
+            config_handlers(),
+            default_namespace="idcat",
+            default_image="example.com/override:1.0",
+        )
+
+
 def test_load_simple_config_with_extra_resources(tmp_path: Path) -> None:
     """Simple config can specify a directory with extra YAML resources."""
     conf = tmp_path / "conf"
@@ -1026,6 +1072,56 @@ def test_load_website_config_with_image(tmp_path: Path) -> None:
     config = only_config(configs)
     assert isinstance(config, WebsiteConfig)
     assert config.image == "nginx:latest"
+
+
+def test_load_website_config_uses_default_image(tmp_path: Path) -> None:
+    """Website config can get its image from namespace-mode API input."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[website]]
+        name = "my-website"
+        """,
+    )
+
+    configs = load_configs(
+        conf_dir,
+        config_handlers(),
+        default_namespace="production",
+        default_image="nginx:latest",
+    )
+    config = only_config(configs)
+    assert isinstance(config, WebsiteConfig)
+    assert config.namespace == "production"
+    assert config.image == "nginx:latest"
+
+
+def test_load_website_config_rejects_image_with_default_image(
+    tmp_path: Path,
+) -> None:
+    """Config image and API image override are mutually exclusive for websites."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[website]]
+        name = "my-website"
+        image = "nginx:latest"
+        """,
+    )
+
+    with pytest.raises(ValueError, match="Cannot specify 'image'.*generate"):
+        load_configs(
+            conf_dir,
+            config_handlers(),
+            default_namespace="production",
+            default_image="example.com/override:1.0",
+        )
 
 
 def test_load_website_config_with_args_string(tmp_path: Path) -> None:
