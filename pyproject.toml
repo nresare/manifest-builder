@@ -8,6 +8,7 @@ dependencies = [
     "click",
     "pyyaml",
     "pystache",
+    "dulwich>=1.2.4",
 ]
 
 [project.scripts]

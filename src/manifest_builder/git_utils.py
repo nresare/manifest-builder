@@ -3,8 +3,11 @@
 """Git utilities for manifest generation and versioning."""
 
 import logging
-import subprocess
 from pathlib import Path
+
+from dulwich import porcelain
+from dulwich.errors import NotGitRepository
+from dulwich.repo import Repo
 
 logger = logging.getLogger(__name__)
 
@@ -51,19 +54,14 @@ def get_git_commit(path: Path) -> str:
         Full commit hash (40 characters)
 
     Raises:
-        RuntimeError: If not a git repository or git command fails
+        RuntimeError: If not a git repository or git operations fail
     """
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to get git commit for {path}: {e.stderr}") from e
+        repo = Repo.discover(path)
+        with repo:
+            return repo.head().decode("ascii")
+    except Exception as e:
+        raise RuntimeError(f"Failed to get git commit for {path}: {e}") from e
 
 
 def is_git_checkout(path: Path) -> bool:
@@ -80,15 +78,10 @@ def is_git_checkout(path: Path) -> bool:
         return False
 
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip() == "true"
-    except subprocess.CalledProcessError:
+        repo = Repo.discover(path)
+        repo.close()
+        return True
+    except NotGitRepository:
         return False
 
 
@@ -103,19 +96,21 @@ def is_git_dirty(path: Path) -> bool:
         True if there are uncommitted changes, False otherwise
 
     Raises:
-        RuntimeError: If not a git repository or git command fails
+        RuntimeError: If not a git repository or git operations fail
     """
     try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return bool(result.stdout.strip())
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to check git status for {path}: {e.stderr}") from e
+        return not _status_is_clean(porcelain.status(path))
+    except Exception as e:
+        raise RuntimeError(f"Failed to check git status for {path}: {e}") from e
+
+
+def _status_is_clean(status: porcelain.GitStatus) -> bool:
+    """Return whether a Dulwich status has no staged, unstaged, or untracked paths."""
+    return (
+        not status.untracked
+        and not status.unstaged
+        and all(not paths for paths in status.staged.values())
+    )
 
 
 def _path_owner(path: Path, output_dir: Path) -> str | None:
@@ -176,44 +171,19 @@ def create_manifest_commit(
     """
     try:
         _prepare_manifest_changes(output_dir, generated_files, owned_namespaces)
-        # Stage all changes (added, modified, deleted)
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=output_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
 
-        # Check if there are any changes to commit
-        status_result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=output_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        if not status_result.stdout.strip():
+        porcelain.add(output_dir)
+        if _status_is_clean(porcelain.status(output_dir)):
             logger.info("There is nothing to commit.")
             return
 
-        # Create commit with version and config info
         commit_message = (
             f"Generate manifests\n"
             f"\n"
             f"Config commit: {config_commit}\n"
             f"Tool version: {version}"
         )
-        subprocess.run(
-            ["git", "commit", "-m", commit_message],
-            cwd=output_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        porcelain.commit(output_dir, message=commit_message.encode())
         logger.info("Created manifest commit in %s", output_dir)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Failed to create git commit in {output_dir}: {e.stderr}"
-        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Failed to create git commit in {output_dir}: {e}") from e
