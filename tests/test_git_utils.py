@@ -4,8 +4,9 @@
 
 import logging
 from pathlib import Path
-from unittest import mock
 
+from dulwich import porcelain
+from dulwich.repo import Repo
 import pytest
 
 from manifest_builder.git_utils import (
@@ -14,6 +15,17 @@ from manifest_builder.git_utils import (
     create_manifest_commit,
     is_git_checkout,
 )
+
+
+def _commit_all(path: Path, message: bytes = b"commit") -> bytes:
+    """Commit all changes in a temporary Dulwich repository."""
+    porcelain.add(path)
+    return porcelain.commit(
+        path,
+        message=message,
+        author=b"Test User <test@example.com>",
+        committer=b"Test User <test@example.com>",
+    )
 
 
 def test_remove_namespace_only_directories_prunes_orphaned_namespace(
@@ -54,21 +66,16 @@ def test_is_git_checkout_returns_false_for_non_checkout(tmp_path: Path) -> None:
     assert not is_git_checkout(tmp_path)
 
 
-@mock.patch("manifest_builder.git_utils.subprocess.run")
 def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
-    mock_run: mock.Mock, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Commit creation removes namespace-only directories before git add -A."""
+    """Commit creation removes namespace-only directories before staging changes."""
+    porcelain.init(tmp_path)
     namespace_dir = tmp_path / "surreal3"
     namespace_dir.mkdir()
     namespace_manifest = namespace_dir / "namespace-surreal3.yaml"
     namespace_manifest.write_text("apiVersion: v1\nkind: Namespace\n")
-
-    mock_run.side_effect = [
-        mock.Mock(stdout="", stderr=""),  # git add -A
-        mock.Mock(stdout="D  surreal3/namespace-surreal3.yaml\n", stderr=""),
-        mock.Mock(stdout="", stderr=""),  # git commit
-    ]
+    first_commit = _commit_all(tmp_path)
 
     with caplog.at_level(logging.INFO, logger="manifest_builder.git_utils"):
         create_manifest_commit(
@@ -79,9 +86,10 @@ def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
         )
 
     assert not namespace_dir.exists()
-    assert mock_run.call_args_list[0].args[0] == ["git", "add", "-A"]
-    assert mock_run.call_args_list[1].args[0] == ["git", "status", "--porcelain"]
-    assert mock_run.call_args_list[2].args[0] == ["git", "commit", "-m", mock.ANY]
+    assert porcelain.status(tmp_path).unstaged == []
+    assert porcelain.status(tmp_path).untracked == []
+    with Repo.discover(tmp_path) as repo:
+        assert repo.head() != first_commit
     assert f"Created manifest commit in {tmp_path}" in caplog.messages
 
 
