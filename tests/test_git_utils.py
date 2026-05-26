@@ -13,6 +13,7 @@ from manifest_builder.git_utils import (
     _prepare_manifest_changes,
     _remove_namespace_only_directories,
     create_manifest_commit,
+    is_git_dirty,
     is_git_checkout,
 )
 
@@ -64,6 +65,18 @@ def test_remove_namespace_only_directories_keeps_namespace_with_other_manifests(
 def test_is_git_checkout_returns_false_for_non_checkout(tmp_path: Path) -> None:
     """Non-git directories are not valid commit output targets."""
     assert not is_git_checkout(tmp_path)
+
+
+def test_is_git_dirty_accepts_tracked_subdirectory(tmp_path: Path) -> None:
+    """A clean tracked config subdirectory can be checked from inside a repo."""
+    porcelain.init(tmp_path)
+    config_dir = tmp_path / ".deploy"
+    config_dir.mkdir()
+    config_file = config_dir / "config.toml"
+    config_file.write_text("name = 'example'\n")
+    _commit_all(tmp_path)
+
+    assert not is_git_dirty(config_dir)
 
 
 def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
