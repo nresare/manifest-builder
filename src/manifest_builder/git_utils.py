@@ -87,7 +87,7 @@ def is_git_checkout(path: Path) -> bool:
 
 def is_git_dirty(path: Path) -> bool:
     """
-    Check if a git directory has uncommitted changes.
+    Check if a path inside a git checkout has uncommitted changes.
 
     Args:
         path: Directory to check
@@ -99,7 +99,11 @@ def is_git_dirty(path: Path) -> bool:
         RuntimeError: If not a git repository or git operations fail
     """
     try:
-        return not _status_is_clean(porcelain.status(path))
+        repo = Repo.discover(path)
+        try:
+            return not _status_is_clean(porcelain.status(repo))
+        finally:
+            repo.close()
     except Exception as e:
         raise RuntimeError(f"Failed to check git status for {path}: {e}") from e
 
