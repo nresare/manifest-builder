@@ -3,8 +3,9 @@
 """Git utilities for manifest generation and versioning."""
 
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
 from dulwich import porcelain
 from dulwich.errors import NotGitRepository
@@ -12,6 +13,14 @@ from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 logger = logging.getLogger(__name__)
+
+
+class _GitConfig(Protocol):
+    """Subset of the Dulwich config API used by remote resolution."""
+
+    def sections(self) -> Iterable[tuple[bytes, ...]]: ...
+
+    def get(self, section: tuple[bytes, ...], name: bytes) -> bytes: ...
 
 
 def _remove_namespace_only_directories(
@@ -68,38 +77,59 @@ def get_git_commit(path: Path) -> str:
 
 def get_git_tracked_remote(path: Path) -> str:
     """
-    Get the URL of the remote tracked by the current branch.
+    Get the URL of the remote that identifies the current checkout.
 
     Args:
         path: Directory to inspect
 
     Returns:
-        URL of the upstream remote for the current branch
+        URL of the upstream remote for the current branch, or a configured remote
 
     Raises:
-        RuntimeError: If no tracked remote can be resolved
+        RuntimeError: If no remote can be resolved
     """
     try:
         repo = Repo.discover(path)
         with repo:
             head_ref = repo.refs.read_ref(cast(Ref, b"HEAD"))
-            if head_ref is None or not head_ref.startswith(b"ref: refs/heads/"):
-                raise RuntimeError("current HEAD is detached")
-
-            branch_name = head_ref.removeprefix(b"ref: refs/heads/")
             config = repo.get_config_stack()
-            try:
-                remote_name = config.get((b"branch", branch_name), b"remote")
-                remote_url = config.get((b"remote", remote_name), b"url")
-            except KeyError as e:
-                branch_text = branch_name.decode("utf-8", errors="replace")
-                raise RuntimeError(
-                    f"branch {branch_text!r} does not track a remote"
-                ) from e
 
-            return remote_url.decode("utf-8")
+            if head_ref is not None and head_ref.startswith(b"ref: refs/heads/"):
+                branch_name = head_ref.removeprefix(b"ref: refs/heads/")
+                try:
+                    remote_name = config.get((b"branch", branch_name), b"remote")
+                    remote_url = config.get((b"remote", remote_name), b"url")
+                    return remote_url.decode("utf-8")
+                except KeyError:
+                    pass
+
+            return _get_configured_remote_url(config)
     except Exception as e:
         raise RuntimeError(f"Failed to get git tracked remote for {path}: {e}") from e
+
+
+def _get_configured_remote_url(config: _GitConfig) -> str:
+    """Return the sole configured remote URL, or origin when several exist."""
+    remote_names = sorted(
+        section[1]
+        for section in config.sections()
+        if len(section) == 2 and section[0] == b"remote"
+    )
+    if not remote_names:
+        raise RuntimeError("No git remotes are configured for the config checkout")
+
+    remote_name = b"origin" if b"origin" in remote_names else remote_names[0]
+    if len(remote_names) > 1 and remote_name != b"origin":
+        names = ", ".join(
+            name.decode("utf-8", errors="replace") for name in remote_names
+        )
+        raise RuntimeError(
+            "Multiple git remotes are configured for the config checkout, "
+            f"but none is named 'origin': {names}"
+        )
+
+    remote_url = config.get((b"remote", remote_name), b"url")
+    return remote_url.decode("utf-8")
 
 
 def is_git_checkout(path: Path) -> bool:

@@ -97,6 +97,49 @@ def test_get_git_tracked_remote_returns_current_branch_remote_url(
     assert get_git_tracked_remote(tmp_path) == "https://example.com/config.git"
 
 
+def test_get_git_tracked_remote_uses_only_remote_for_detached_head(
+    tmp_path: Path,
+) -> None:
+    """Detached HEAD checkouts use the sole configured remote URL."""
+    repo = porcelain.init(tmp_path)
+    config = repo.get_config()
+    config.set((b"remote", b"upstream"), b"url", b"https://example.com/config.git")
+    config.write_to_path()
+    repo.close()
+    (tmp_path / "config.toml").write_text("name = 'example'\n")
+    commit = _commit_all(tmp_path)
+    porcelain.update_head(tmp_path, commit, detached=True)
+
+    assert get_git_tracked_remote(tmp_path) == "https://example.com/config.git"
+
+
+def test_get_git_tracked_remote_prefers_origin_for_detached_head(
+    tmp_path: Path,
+) -> None:
+    """Detached HEAD checkouts with several remotes prefer origin."""
+    repo = porcelain.init(tmp_path)
+    config = repo.get_config()
+    config.set((b"remote", b"fork"), b"url", b"https://example.com/fork.git")
+    config.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
+    config.write_to_path()
+    repo.close()
+    (tmp_path / "config.toml").write_text("name = 'example'\n")
+    commit = _commit_all(tmp_path)
+    porcelain.update_head(tmp_path, commit, detached=True)
+
+    assert get_git_tracked_remote(tmp_path) == "https://example.com/config.git"
+
+
+def test_get_git_tracked_remote_fails_when_no_remotes_are_configured(
+    tmp_path: Path,
+) -> None:
+    """A checkout without configured remotes fails with an explicit error."""
+    porcelain.init(tmp_path)
+
+    with pytest.raises(RuntimeError, match="No git remotes are configured"):
+        get_git_tracked_remote(tmp_path)
+
+
 def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
