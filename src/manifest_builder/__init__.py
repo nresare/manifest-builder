@@ -6,6 +6,8 @@ from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from manifest_builder.result import GenerationResult, KubernetesObjectRef
+
 try:
     __version__ = str(
         getattr(import_module("manifest_builder._version"), "__version__")
@@ -26,7 +28,7 @@ def generate(
     allow_dirty_config: bool = False,
     namespace: str | None = None,
     image: str | None = None,
-) -> set[Path]:
+) -> GenerationResult:
     """Generate manifests from ``config`` into ``output``."""
     # Keep this wrapper lazy: api imports __version__ from this module.
     from manifest_builder.api import generate as api_generate
@@ -53,4 +55,4 @@ def generate(
     )
 
 
-__all__ = ["__version__", "generate"]
+__all__ = ["GenerationResult", "KubernetesObjectRef", "__version__", "generate"]

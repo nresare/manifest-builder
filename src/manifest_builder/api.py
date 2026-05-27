@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: The manifest-builder contributors
-"""Public API for generating manifests."""
-
-import logging
+import hashlib
 import json
+import logging
 from pathlib import Path
+from typing import Any
 
 from manifest_builder import __version__
 from manifest_builder.config import (
@@ -15,19 +15,29 @@ from manifest_builder.config import (
     resolve_configs,
 )
 from manifest_builder.copy import CopyConfigHandler
-from manifest_builder.generator import HelmConfigHandler, generate_manifests, plural
+from manifest_builder.generator import (
+    HelmConfigHandler,
+    _dump_yaml,
+    _load_all_yaml,
+    generate_manifests,
+    plural,
+)
 from manifest_builder.git_utils import (
     create_manifest_commit,
     get_git_commit,
+    get_git_head_file,
+    get_git_manifest_changes,
     get_git_tracked_remote,
     is_git_checkout,
     is_git_dirty,
 )
 from manifest_builder.helmfile import load_helmfile
+from manifest_builder.result import GenerationResult, KubernetesObjectRef
 from manifest_builder.simple import SimpleConfigHandler
 from manifest_builder.website import WebsiteConfigHandler
 
 logger = logging.getLogger(__name__)
+DEPLOY_ID_ANNOTATION = "noa.re/deploy-id"
 
 
 def generate(
@@ -40,7 +50,7 @@ def generate(
     vars_from: Path | None = None,
     namespace: str | None = None,
     image: str | None = None,
-) -> set[Path]:
+) -> GenerationResult:
     """Generate manifests from ``config`` into ``output``.
 
     Args:
@@ -66,7 +76,7 @@ def generate(
             set an ``image`` field in the config file.
 
     Returns:
-        Set of manifest paths written during generation.
+        Summary of written paths and object-level changes.
     """
     if repo_root is None:
         repo_root = Path.cwd()
@@ -156,8 +166,12 @@ def generate(
         owner_path = _write_namespace_owner(output, namespace)
         written_paths.add(owner_path)
 
+    config_commit = get_git_commit(config) if is_git_checkout(config) else None
+    result = _collect_generation_result(output, written_paths, config_commit)
+
     if create_commit:
-        config_commit = get_git_commit(config)
+        if config_commit is None:
+            config_commit = get_git_commit(config)
         config_remote = get_git_tracked_remote(config)
         commit_owned_namespaces = owned_namespaces
         if namespace is not None:
@@ -173,7 +187,112 @@ def generate(
             commit_owned_namespaces,
         )
 
-    return written_paths
+    return result
+
+
+def _collect_generation_result(
+    output: Path, written_paths: set[Path], config_commit: str | None
+) -> GenerationResult:
+    """Annotate changed manifests and return object-level git changes."""
+    if not is_git_checkout(output):
+        return GenerationResult(written_paths=written_paths)
+
+    changes = get_git_manifest_changes(output)
+    deploy_id = _make_deploy_id(__version__, config_commit) if config_commit else None
+    if deploy_id is not None and changes.added_or_modified:
+        _annotate_manifest_files(changes.added_or_modified, deploy_id)
+        changes = get_git_manifest_changes(output)
+
+    return GenerationResult(
+        written_paths=written_paths,
+        created_or_modified=_object_refs_from_paths(changes.added_or_modified),
+        removed=_object_refs_from_deleted_paths(changes.deleted),
+        deploy_id=deploy_id,
+    )
+
+
+def _make_deploy_id(version: str, config_commit: str) -> str:
+    """Return a deterministic 64-bit deploy id as 16 hex characters."""
+    return hashlib.sha256(f"{version}\0{config_commit}".encode()).hexdigest()[:16]
+
+
+def _annotate_manifest_files(paths: set[Path], deploy_id: str) -> None:
+    for path in sorted(paths):
+        text = path.read_text()
+        leading_comments = _leading_comments(text)
+        documents = _load_all_yaml(text)
+        changed = False
+        for doc in documents:
+            if not isinstance(doc, dict) or not doc.get("kind"):
+                continue
+            metadata = doc.setdefault("metadata", {})
+            if not isinstance(metadata, dict):
+                raise TypeError(f"metadata is not a dict in {path}")
+            annotations = metadata.setdefault("annotations", {})
+            if annotations is None:
+                annotations = {}
+                metadata["annotations"] = annotations
+            if not isinstance(annotations, dict):
+                raise TypeError(f"metadata.annotations is not a dict in {path}")
+            if annotations.get(DEPLOY_ID_ANNOTATION) != deploy_id:
+                annotations[DEPLOY_ID_ANNOTATION] = deploy_id
+                changed = True
+
+        if changed:
+            with open(path, "w") as f:
+                f.write(leading_comments)
+                for index, doc in enumerate(documents):
+                    if index:
+                        f.write("---\n")
+                    _dump_yaml(doc, f)
+
+
+def _leading_comments(text: str) -> str:
+    comments: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if not line.startswith("#"):
+            break
+        comments.append(line)
+    return "".join(comments)
+
+
+def _object_refs_from_paths(paths: set[Path]) -> set[KubernetesObjectRef]:
+    refs: set[KubernetesObjectRef] = set()
+    for path in paths:
+        refs.update(_object_refs_from_content(path.read_text()))
+    return refs
+
+
+def _object_refs_from_deleted_paths(paths: set[Path]) -> set[KubernetesObjectRef]:
+    refs: set[KubernetesObjectRef] = set()
+    for path in paths:
+        refs.update(_object_refs_from_content(get_git_head_file(path).decode()))
+    return refs
+
+
+def _object_refs_from_content(content: str) -> set[KubernetesObjectRef]:
+    refs: set[KubernetesObjectRef] = set()
+    for doc in _load_all_yaml(content):
+        ref = _object_ref_from_doc(doc)
+        if ref is not None:
+            refs.add(ref)
+    return refs
+
+
+def _object_ref_from_doc(doc: Any) -> KubernetesObjectRef | None:
+    if not isinstance(doc, dict):
+        return None
+    kind = doc.get("kind")
+    metadata = doc.get("metadata") or {}
+    if not isinstance(kind, str) or not isinstance(metadata, dict):
+        return None
+    name = metadata.get("name")
+    namespace = metadata.get("namespace")
+    if not isinstance(name, str):
+        return None
+    if namespace is not None and not isinstance(namespace, str):
+        namespace = None
+    return KubernetesObjectRef(kind=kind, namespace=namespace, name=name)
 
 
 def _cluster_output_paths(output: Path, paths: set[Path]) -> list[Path]:
@@ -205,5 +324,7 @@ def _non_target_output_owners(output: Path, namespace: str) -> set[str]:
     return {
         path.name
         for path in output.iterdir()
-        if path.is_dir() and path.name not in {namespace, "owners"}
+        if path.is_dir()
+        and not path.name.startswith(".")
+        and path.name not in {namespace, "owners"}
     }
