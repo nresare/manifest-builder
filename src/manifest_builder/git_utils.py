@@ -4,9 +4,11 @@
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from dulwich import porcelain
 from dulwich.errors import NotGitRepository
+from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,42 @@ def get_git_commit(path: Path) -> str:
             return repo.head().decode("ascii")
     except Exception as e:
         raise RuntimeError(f"Failed to get git commit for {path}: {e}") from e
+
+
+def get_git_tracked_remote(path: Path) -> str:
+    """
+    Get the URL of the remote tracked by the current branch.
+
+    Args:
+        path: Directory to inspect
+
+    Returns:
+        URL of the upstream remote for the current branch
+
+    Raises:
+        RuntimeError: If no tracked remote can be resolved
+    """
+    try:
+        repo = Repo.discover(path)
+        with repo:
+            head_ref = repo.refs.read_ref(cast(Ref, b"HEAD"))
+            if head_ref is None or not head_ref.startswith(b"ref: refs/heads/"):
+                raise RuntimeError("current HEAD is detached")
+
+            branch_name = head_ref.removeprefix(b"ref: refs/heads/")
+            config = repo.get_config_stack()
+            try:
+                remote_name = config.get((b"branch", branch_name), b"remote")
+                remote_url = config.get((b"remote", remote_name), b"url")
+            except KeyError as e:
+                branch_text = branch_name.decode("utf-8", errors="replace")
+                raise RuntimeError(
+                    f"branch {branch_text!r} does not track a remote"
+                ) from e
+
+            return remote_url.decode("utf-8")
+    except Exception as e:
+        raise RuntimeError(f"Failed to get git tracked remote for {path}: {e}") from e
 
 
 def is_git_checkout(path: Path) -> bool:
@@ -152,6 +190,7 @@ def _prepare_manifest_changes(
 def create_manifest_commit(
     output_dir: Path,
     version: str,
+    config_remote: str,
     config_commit: str,
     generated_files: set[Path],
     owned_namespaces: set[str] | None = None,
@@ -165,6 +204,7 @@ def create_manifest_commit(
     Args:
         output_dir: Directory to create commit in
         version: Version of manifest-builder
+        config_remote: URL of the remote tracked by the config branch
         config_commit: Commit hash of the config directory
         generated_files: Set of file paths that were generated in this run
         owned_namespaces: Namespaces owned by other services; their files are
@@ -184,6 +224,7 @@ def create_manifest_commit(
         commit_message = (
             f"Generate manifests\n"
             f"\n"
+            f"Config remote: {config_remote}\n"
             f"Config commit: {config_commit}\n"
             f"Tool version: {version}"
         )

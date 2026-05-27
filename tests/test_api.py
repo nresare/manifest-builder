@@ -237,6 +237,7 @@ def test_generate_namespace_mode_rejects_cluster_output(
 
 
 @mock.patch("manifest_builder.api.create_manifest_commit")
+@mock.patch("manifest_builder.api.get_git_tracked_remote", return_value="config.git")
 @mock.patch("manifest_builder.api.get_git_commit", return_value="abc123")
 @mock.patch("manifest_builder.api.is_git_dirty", return_value=False)
 @mock.patch("manifest_builder.api.is_git_checkout", return_value=True)
@@ -256,6 +257,7 @@ def test_namespace_mode_commit_preserves_non_target_directories(
     mock_is_git_checkout: mock.Mock,
     mock_is_git_dirty: mock.Mock,
     mock_get_git_commit: mock.Mock,
+    mock_get_git_tracked_remote: mock.Mock,
     mock_create_manifest_commit: mock.Mock,
     tmp_path: Path,
 ) -> None:
@@ -269,6 +271,7 @@ def test_namespace_mode_commit_preserves_non_target_directories(
         mock_is_git_checkout,
         mock_is_git_dirty,
         mock_get_git_commit,
+        mock_get_git_tracked_remote,
     )
     config = tmp_path / "config"
     output = tmp_path / "output"
@@ -289,7 +292,11 @@ def test_namespace_mode_commit_preserves_non_target_directories(
 
     assert generated in result
     mock_create_manifest_commit.assert_called_once()
-    assert mock_create_manifest_commit.call_args.args[4] == {"team-b", "cluster"}
+    assert mock_create_manifest_commit.call_args.args[2:4] == (
+        "config.git",
+        "abc123",
+    )
+    assert mock_create_manifest_commit.call_args.args[5] == {"team-b", "cluster"}
 
 
 @mock.patch("manifest_builder.api.generate", return_value={Path("/out/app.yaml")})

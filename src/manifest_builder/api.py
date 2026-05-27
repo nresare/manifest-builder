@@ -19,6 +19,7 @@ from manifest_builder.generator import HelmConfigHandler, generate_manifests, pl
 from manifest_builder.git_utils import (
     create_manifest_commit,
     get_git_commit,
+    get_git_tracked_remote,
     is_git_checkout,
     is_git_dirty,
 )
@@ -157,6 +158,7 @@ def generate(
 
     if create_commit:
         config_commit = get_git_commit(config)
+        config_remote = get_git_tracked_remote(config)
         commit_owned_namespaces = owned_namespaces
         if namespace is not None:
             commit_owned_namespaces = owned_namespaces | _non_target_output_owners(
@@ -165,6 +167,7 @@ def generate(
         create_manifest_commit(
             output,
             __version__,
+            config_remote,
             config_commit,
             written_paths,
             commit_owned_namespaces,
