@@ -6,13 +6,81 @@ from pathlib import Path
 from unittest import mock
 from unittest.mock import call
 
-from manifest_builder import generate
-from manifest_builder.api import generate as api_generate
+from dulwich import porcelain
+import yaml
+
+from manifest_builder import GenerationResult, __version__, generate
+from manifest_builder.api import (
+    DEPLOY_ID_ANNOTATION,
+    _make_deploy_id,
+    generate as api_generate,
+)
+from manifest_builder.git_utils import GitManifestChanges
+from manifest_builder.result import KubernetesObjectRef
 
 
 def test_generate_is_available_from_top_level_package() -> None:
     """Call sites can import generate directly from manifest_builder."""
     assert generate.__name__ == "generate"
+
+
+def _commit_all(path: Path, message: bytes = b"commit") -> bytes:
+    """Commit all changes in a temporary Dulwich repository."""
+    porcelain.add(path)
+    return porcelain.commit(
+        path,
+        message=message,
+        author=b"Test User <test@example.com>",
+        committer=b"Test User <test@example.com>",
+    )
+
+
+def test_generate_reports_changed_objects_and_adds_deploy_id(
+    tmp_path: Path,
+) -> None:
+    """Generation result lists git changes and annotates changed objects."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    porcelain.init(config)
+    porcelain.init(output)
+    (config / "config.toml").write_text(
+        """\
+[[simple]]
+namespace = "idcat"
+image = "registry.example.com/idcat:1.0"
+"""
+    )
+    config_commit = _commit_all(config).decode("ascii")
+
+    stale = output / "idcat" / "configmap-old.yaml"
+    stale.parent.mkdir()
+    stale.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: old
+  namespace: idcat
+"""
+    )
+    _commit_all(output)
+
+    result = api_generate(config, output, repo_root=tmp_path)
+
+    deploy_id = _make_deploy_id(__version__, config_commit)
+    assert result.deploy_id == deploy_id
+    assert result.created_or_modified == {
+        KubernetesObjectRef("Deployment", "idcat", "idcat"),
+        KubernetesObjectRef("Namespace", None, "idcat"),
+        KubernetesObjectRef("Service", "idcat", "idcat"),
+    }
+    assert result.removed == {KubernetesObjectRef("ConfigMap", "idcat", "old")}
+
+    for path in result.written_paths:
+        doc = yaml.safe_load(path.read_text())
+        assert doc["metadata"]["annotations"][DEPLOY_ID_ANNOTATION] == deploy_id
 
 
 @mock.patch("manifest_builder.api.generate_manifests")
@@ -65,7 +133,7 @@ def test_generate_accepts_config_and_output_paths(
 
     result = api_generate(config, output, repo_root=tmp_path)
 
-    assert result == {Path("/out/app.yaml")}
+    assert result.written_paths == {Path("/out/app.yaml")}
     mock_load_helmfile.assert_called_once_with(config / "releases.yaml")
     mock_load_configs.assert_called_once_with(
         config,
@@ -113,7 +181,7 @@ def test_generate_namespace_mode_writes_owner_file(
     result = api_generate(config, output, repo_root=tmp_path, namespace="team-a")
 
     owner = output / "owners" / "team-a.toml"
-    assert owner in result
+    assert owner in result.written_paths
     assert owner.read_text() == 'namespace = "team-a"\n'
     mock_load_configs.assert_called_once_with(
         config,
@@ -239,6 +307,7 @@ def test_generate_namespace_mode_rejects_cluster_output(
 @mock.patch("manifest_builder.api.create_manifest_commit")
 @mock.patch("manifest_builder.api.get_git_tracked_remote", return_value="config.git")
 @mock.patch("manifest_builder.api.get_git_commit", return_value="abc123")
+@mock.patch("manifest_builder.api.get_git_manifest_changes")
 @mock.patch("manifest_builder.api.is_git_dirty", return_value=False)
 @mock.patch("manifest_builder.api.is_git_checkout", return_value=True)
 @mock.patch("manifest_builder.api.generate_manifests")
@@ -256,12 +325,14 @@ def test_namespace_mode_commit_preserves_non_target_directories(
     mock_generate_manifests: mock.Mock,
     mock_is_git_checkout: mock.Mock,
     mock_is_git_dirty: mock.Mock,
+    mock_get_git_manifest_changes: mock.Mock,
     mock_get_git_commit: mock.Mock,
     mock_get_git_tracked_remote: mock.Mock,
     mock_create_manifest_commit: mock.Mock,
     tmp_path: Path,
 ) -> None:
     """Commit cleanup also treats non-target output directories as protected."""
+    mock_get_git_manifest_changes.return_value = GitManifestChanges()
     del (
         mock_load_helmfile,
         mock_load_configs,
@@ -270,6 +341,7 @@ def test_namespace_mode_commit_preserves_non_target_directories(
         mock_load_owned_namespaces,
         mock_is_git_checkout,
         mock_is_git_dirty,
+        mock_get_git_manifest_changes,
         mock_get_git_commit,
         mock_get_git_tracked_remote,
     )
@@ -290,7 +362,7 @@ def test_namespace_mode_commit_preserves_non_target_directories(
         create_commit=True,
     )
 
-    assert generated in result
+    assert generated in result.written_paths
     mock_create_manifest_commit.assert_called_once()
     assert mock_create_manifest_commit.call_args.args[2:4] == (
         "config.git",
@@ -299,7 +371,10 @@ def test_namespace_mode_commit_preserves_non_target_directories(
     assert mock_create_manifest_commit.call_args.args[5] == {"team-b", "cluster"}
 
 
-@mock.patch("manifest_builder.api.generate", return_value={Path("/out/app.yaml")})
+@mock.patch(
+    "manifest_builder.api.generate",
+    return_value=GenerationResult(written_paths={Path("/out/app.yaml")}),
+)
 def test_top_level_generate_delegates_to_api(mock_generate: mock.Mock) -> None:
     """The top-level convenience import calls the API implementation."""
     result = generate(
@@ -311,7 +386,7 @@ def test_top_level_generate_delegates_to_api(mock_generate: mock.Mock) -> None:
         allow_dirty_config=True,
     )
 
-    assert result == {Path("/out/app.yaml")}
+    assert result.written_paths == {Path("/out/app.yaml")}
     mock_generate.assert_called_once_with(
         Path("conf"),
         Path("output"),
@@ -322,7 +397,10 @@ def test_top_level_generate_delegates_to_api(mock_generate: mock.Mock) -> None:
     )
 
 
-@mock.patch("manifest_builder.api.generate", return_value={Path("/out/app.yaml")})
+@mock.patch(
+    "manifest_builder.api.generate",
+    return_value=GenerationResult(written_paths={Path("/out/app.yaml")}),
+)
 def test_top_level_generate_passes_namespace_image(mock_generate: mock.Mock) -> None:
     """The top-level convenience wrapper exposes the image override."""
     result = generate(
@@ -333,7 +411,7 @@ def test_top_level_generate_passes_namespace_image(mock_generate: mock.Mock) -> 
         image="registry.example.com/app:1.0",
     )
 
-    assert result == {Path("/out/app.yaml")}
+    assert result.written_paths == {Path("/out/app.yaml")}
     mock_generate.assert_called_once_with(
         Path("conf"),
         Path("output"),

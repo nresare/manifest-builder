@@ -761,6 +761,7 @@ def _ensure_namespaces(
             or ns_dir.name == "cluster"
             or ns_dir.name == "kube-system"
             or ns_dir.name == "owners"
+            or ns_dir.name.startswith(".")
             or ns_dir.name in owned
             or (
                 managed_namespaces is not None and ns_dir.name not in managed_namespaces
@@ -813,6 +814,8 @@ def _cleanup_stale_files(
     owned = owned_namespaces or set()
     for existing in output_dir.rglob("*.yaml"):
         namespace = _path_namespace(existing, output_dir)
+        if namespace is not None and namespace.startswith("."):
+            continue
         if namespace in owned:
             continue
         if managed_namespaces is not None and namespace not in managed_namespaces:
@@ -826,6 +829,8 @@ def _cleanup_stale_files(
         if not directory.is_dir():
             continue
         namespace = _path_namespace(directory, output_dir)
+        if namespace is not None and namespace.startswith("."):
+            continue
         if namespace in owned:
             continue
         if managed_namespaces is not None and namespace not in managed_namespaces:
@@ -858,6 +863,8 @@ def _count_removed_files(
     removed = 0
     for existing in output_dir.rglob("*.yaml"):
         namespace = _path_namespace(existing, output_dir)
+        if namespace is not None and namespace.startswith("."):
+            continue
         if namespace in owned:
             continue
         if managed_namespaces is not None and namespace not in managed_namespaces:

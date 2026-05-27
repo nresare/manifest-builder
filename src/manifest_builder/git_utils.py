@@ -4,15 +4,31 @@
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
 from dulwich import porcelain
 from dulwich.errors import NotGitRepository
+from dulwich.objects import Blob, Commit, Tree
 from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GitManifestChanges:
+    """Manifest file changes reported by git."""
+
+    added: set[Path] = field(default_factory=set)
+    modified: set[Path] = field(default_factory=set)
+    deleted: set[Path] = field(default_factory=set)
+
+    @property
+    def added_or_modified(self) -> set[Path]:
+        """Return files that exist in the working tree after generation."""
+        return self.added | self.modified
 
 
 class _GitConfig(Protocol):
@@ -41,6 +57,7 @@ def _remove_namespace_only_directories(
             not namespace_dir.is_dir()
             or namespace_dir.name == "cluster"
             or namespace_dir.name == "kube-system"
+            or namespace_dir.name.startswith(".")
             or namespace_dir.name in owned
         ):
             continue
@@ -176,6 +193,76 @@ def is_git_dirty(path: Path) -> bool:
         raise RuntimeError(f"Failed to check git status for {path}: {e}") from e
 
 
+def get_git_manifest_changes(path: Path) -> GitManifestChanges:
+    """Return changed YAML files below ``path`` using Dulwich status."""
+    try:
+        repo = Repo.discover(path)
+        try:
+            repo_root = Path(repo.path).resolve()
+            output_root = path.resolve()
+            status = porcelain.status(repo)
+            changes = GitManifestChanges()
+
+            for raw_path in status.staged.get("add", []):
+                _add_status_path(changes.added, repo_root, output_root, raw_path)
+            for raw_path in status.staged.get("modify", []):
+                _add_status_path(changes.modified, repo_root, output_root, raw_path)
+            for raw_path in status.staged.get("delete", []):
+                _add_status_path(changes.deleted, repo_root, output_root, raw_path)
+
+            for raw_path in status.untracked:
+                _add_status_path(changes.added, repo_root, output_root, raw_path)
+
+            for raw_path in status.unstaged:
+                absolute_path = repo_root / raw_path.decode("utf-8")
+                if absolute_path.exists():
+                    _add_status_path(changes.modified, repo_root, output_root, raw_path)
+                else:
+                    _add_status_path(changes.deleted, repo_root, output_root, raw_path)
+
+            return changes
+        finally:
+            repo.close()
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to inspect git manifest changes in {path}: {e}"
+        ) from e
+
+
+def get_git_head_file(path: Path) -> bytes:
+    """Return a file's contents from HEAD."""
+    try:
+        repo = Repo.discover(path)
+        try:
+            repo_root = Path(repo.path).resolve()
+            relative_path = path.resolve().relative_to(repo_root)
+            commit = cast(Commit, repo[repo.head()])
+            tree = cast(Tree, repo[commit.tree])
+            _mode, sha = tree.lookup_path(
+                repo.object_store.__getitem__,
+                str(relative_path).encode("utf-8"),
+            )
+            blob = cast(Blob, repo[sha])
+            return blob.data
+        finally:
+            repo.close()
+    except Exception as e:
+        raise RuntimeError(f"Failed to read {path} from git HEAD: {e}") from e
+
+
+def _add_status_path(
+    paths: set[Path], repo_root: Path, output_root: Path, raw_path: bytes
+) -> None:
+    absolute_path = repo_root / raw_path.decode("utf-8")
+    if absolute_path.suffix != ".yaml":
+        return
+    try:
+        absolute_path.relative_to(output_root)
+    except ValueError:
+        return
+    paths.add(absolute_path)
+
+
 def _status_is_clean(status: porcelain.GitStatus) -> bool:
     """Return whether a Dulwich status has no staged, unstaged, or untracked paths."""
     return (
@@ -206,7 +293,7 @@ def _prepare_manifest_changes(
     all_yaml_files = {
         p
         for p in output_dir.rglob("*.yaml")
-        if not owned or _path_owner(p, output_dir) not in owned
+        if _should_manage_manifest_path(p, output_dir, owned)
     }
 
     # Remove old .yaml files that were not generated in this run
@@ -262,3 +349,12 @@ def create_manifest_commit(
         logger.info("Created manifest commit in %s", output_dir)
     except Exception as e:
         raise RuntimeError(f"Failed to create git commit in {output_dir}: {e}") from e
+
+
+def _should_manage_manifest_path(
+    path: Path, output_dir: Path, owned_namespaces: set[str]
+) -> bool:
+    owner = _path_owner(path, output_dir)
+    if owner is None or owner.startswith("."):
+        return False
+    return owner not in owned_namespaces
