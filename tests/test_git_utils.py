@@ -4,8 +4,10 @@
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from dulwich import porcelain
+from dulwich.objects import Commit
 from dulwich.repo import Repo
 import pytest
 
@@ -13,8 +15,9 @@ from manifest_builder.git_utils import (
     _prepare_manifest_changes,
     _remove_namespace_only_directories,
     create_manifest_commit,
-    is_git_dirty,
+    get_git_tracked_remote,
     is_git_checkout,
+    is_git_dirty,
 )
 
 
@@ -79,6 +82,21 @@ def test_is_git_dirty_accepts_tracked_subdirectory(tmp_path: Path) -> None:
     assert not is_git_dirty(config_dir)
 
 
+def test_get_git_tracked_remote_returns_current_branch_remote_url(
+    tmp_path: Path,
+) -> None:
+    """The tracked remote URL is resolved from the current branch config."""
+    repo = porcelain.init(tmp_path)
+    config = repo.get_config()
+    config.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
+    config.set((b"branch", b"master"), b"remote", b"origin")
+    config.set((b"branch", b"master"), b"merge", b"refs/heads/main")
+    config.write_to_path()
+    repo.close()
+
+    assert get_git_tracked_remote(tmp_path) == "https://example.com/config.git"
+
+
 def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -94,6 +112,7 @@ def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
         create_manifest_commit(
             output_dir=tmp_path,
             version="1.2.3",
+            config_remote="https://example.com/config.git",
             config_commit="abc123",
             generated_files={namespace_manifest},
         )
@@ -103,6 +122,14 @@ def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
     assert porcelain.status(tmp_path).untracked == []
     with Repo.discover(tmp_path) as repo:
         assert repo.head() != first_commit
+        commit = cast(Commit, repo[repo.head()])
+    assert commit.message == (
+        b"Generate manifests\n"
+        b"\n"
+        b"Config remote: https://example.com/config.git\n"
+        b"Config commit: abc123\n"
+        b"Tool version: 1.2.3"
+    )
     assert f"Created manifest commit in {tmp_path}" in caplog.messages
 
 
