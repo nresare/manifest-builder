@@ -92,3 +92,31 @@ def test_main_reports_generate_errors(
     assert "Configuration error: bad config" in result.output
     mock_get_helm_version.assert_called_once_with()
     mock_generate.assert_called_once()
+
+
+@mock.patch("manifest_builder.cli.get_helm_version", return_value="v3.0.0")
+def test_main_reports_releases_yaml_scanner_error_concisely(
+    mock_get_helm_version: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    """YAML syntax errors in releases.yaml are logged without a traceback."""
+    config_dir = tmp_path / "conf"
+    output_dir = tmp_path / "out"
+    config_dir.mkdir()
+    output_dir.mkdir()
+    (config_dir / "releases.yaml").write_text(
+        "repositories:\n  - name envoyproxy\n    url: docker.io/envoyproxy\n"
+    )
+
+    result = CliRunner().invoke(
+        main,
+        ["--config-dir", str(config_dir), "--output-dir", str(output_dir)],
+    )
+
+    assert result.exit_code == 1
+    assert (
+        '[CRITICAL] mapping values are not allowed here in "releases.yaml", '
+        "line 3, column 8"
+    ) in result.output
+    assert "Traceback" not in result.output
+    mock_get_helm_version.assert_called_once_with()

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import click
+from yaml.scanner import ScannerError
 
 from manifest_builder import __version__
 from manifest_builder.api import generate
@@ -14,6 +15,20 @@ from manifest_builder.generator import ManifestError, setup_logging
 from manifest_builder.helm import get_helm_version
 
 logger = logging.getLogger(__name__)
+
+
+def _format_scanner_error(error: ScannerError, config_dir: Path) -> str:
+    mark = error.problem_mark
+    if mark is None or mark.name is None:
+        return str(error)
+
+    config_path = (Path.cwd() / config_dir).resolve()
+    yaml_path = Path(mark.name).resolve()
+    try:
+        mark.name = str(yaml_path.relative_to(config_path))
+    except ValueError:
+        mark.name = str(yaml_path)
+    return " ".join(str(error).split())
 
 
 @click.command()
@@ -91,6 +106,9 @@ def main(
 
     except ManifestError as e:
         click.echo(f"Error processing {e.config_name}: {e}", err=True)
+        sys.exit(1)
+    except ScannerError as e:
+        logger.fatal(_format_scanner_error(e, config_dir))
         sys.exit(1)
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
