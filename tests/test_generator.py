@@ -221,7 +221,9 @@ def test_generate_manifests_preserves_files_in_owned_namespace(tmp_path: Path) -
     assert owned_file not in written
 
 
-def test_generate_manifests_cleans_only_managed_namespaces(tmp_path: Path) -> None:
+def test_generate_manifests_cleans_only_managed_namespaces(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Namespace-scoped generation must not remove files outside its namespace."""
     output_dir = tmp_path / "out"
     target_stale = output_dir / "team-a" / "configmap-old.yaml"
@@ -250,8 +252,11 @@ metadata:
 data: {}
 """
 
-    with mock.patch(
-        "manifest_builder.generator.run_helm_template", return_value=manifest
+    with (
+        caplog.at_level(logging.DEBUG, logger="manifest_builder.generator"),
+        mock.patch(
+            "manifest_builder.generator.run_helm_template", return_value=manifest
+        ),
     ):
         written = generate_manifests(
             [HelmConfigHandler([config])],
@@ -266,6 +271,9 @@ data: {}
     assert other_stale.exists()
     assert cluster_stale.exists()
     assert not (output_dir / "team-b" / "namespace-team-b.yaml").exists()
+    assert (
+        "Deleted stale manifest during generation cleanup: team-a/configmap-old.yaml"
+    ) in caplog.messages
 
 
 def test_generate_manifests_rejects_output_landing_in_owned_namespace(

@@ -822,7 +822,10 @@ def _cleanup_stale_files(
             continue
         if existing not in written_paths:
             existing.unlink()
-            logger.debug(f"Removed {existing.relative_to(output_dir)}")
+            logger.debug(
+                "Deleted stale manifest during generation cleanup: %s",
+                existing.relative_to(output_dir),
+            )
 
     # Remove any empty directories, except those owned by other services
     for directory in sorted(output_dir.rglob("*"), reverse=True):

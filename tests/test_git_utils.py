@@ -33,7 +33,7 @@ def _commit_all(path: Path, message: bytes = b"commit") -> bytes:
 
 
 def test_remove_namespace_only_directories_prunes_orphaned_namespace(
-    tmp_path: Path,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A namespace directory with only namespace-<name>.yaml is removed."""
     namespace_dir = tmp_path / "surreal3"
@@ -41,10 +41,15 @@ def test_remove_namespace_only_directories_prunes_orphaned_namespace(
     namespace_manifest = namespace_dir / "namespace-surreal3.yaml"
     namespace_manifest.write_text("apiVersion: v1\nkind: Namespace\n")
 
-    _remove_namespace_only_directories(tmp_path)
+    with caplog.at_level(logging.DEBUG, logger="manifest_builder.git_utils"):
+        _remove_namespace_only_directories(tmp_path)
 
     assert not namespace_manifest.exists()
     assert not namespace_dir.exists()
+    assert (
+        "Deleted namespace-only manifest during commit cleanup: "
+        "surreal3/namespace-surreal3.yaml"
+    ) in caplog.messages
 
 
 def test_remove_namespace_only_directories_keeps_namespace_with_other_manifests(
@@ -177,7 +182,7 @@ def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
 
 
 def test_prepare_manifest_changes_preserves_owned_namespace_files(
-    tmp_path: Path,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Pre-commit cleanup must leave files in owned namespace directories alone."""
     owned = tmp_path / "team-a" / "configmap-foo.yaml"
@@ -189,8 +194,12 @@ def test_prepare_manifest_changes_preserves_owned_namespace_files(
     fresh = tmp_path / "default" / "configmap-fresh.yaml"
     fresh.write_text("apiVersion: v1\nkind: ConfigMap\n")
 
-    _prepare_manifest_changes(tmp_path, {fresh}, owned_namespaces={"team-a"})
+    with caplog.at_level(logging.DEBUG, logger="manifest_builder.git_utils"):
+        _prepare_manifest_changes(tmp_path, {fresh}, owned_namespaces={"team-a"})
 
     assert owned.exists()
     assert fresh.exists()
     assert not stale.exists()
+    assert (
+        "Deleted stale manifest during commit cleanup: default/configmap-stale.yaml"
+    ) in caplog.messages
