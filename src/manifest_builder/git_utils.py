@@ -67,6 +67,10 @@ def _remove_namespace_only_directories(
 
         if files == [expected_namespace_file]:
             expected_namespace_file.unlink()
+            logger.debug(
+                "Deleted namespace-only manifest during commit cleanup: %s",
+                expected_namespace_file.relative_to(output_dir),
+            )
             namespace_dir.rmdir()
             logger.debug("Removed namespace-only directory %s", namespace_dir.name)
 
@@ -300,6 +304,10 @@ def _prepare_manifest_changes(
     old_yaml_files = all_yaml_files - generated_files
     for old_file in old_yaml_files:
         old_file.unlink()
+        logger.debug(
+            "Deleted stale manifest during commit cleanup: %s",
+            old_file.relative_to(output_dir),
+        )
 
     _remove_namespace_only_directories(output_dir, owned)
 
