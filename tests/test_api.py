@@ -3,10 +3,13 @@
 """Tests for the reusable manifest-builder API."""
 
 from pathlib import Path
+from typing import cast
 from unittest import mock
 from unittest.mock import call
 
 from dulwich import porcelain
+from dulwich.objects import Commit
+from dulwich.repo import Repo
 import yaml
 
 from manifest_builder import GenerationResult, __version__, generate
@@ -369,6 +372,86 @@ def test_namespace_mode_commit_preserves_non_target_directories(
         "abc123",
     )
     assert mock_create_manifest_commit.call_args.args[5] == {"team-b", "cluster"}
+
+
+def test_namespace_mode_commit_keeps_existing_cluster_and_other_namespace_files(
+    tmp_path: Path,
+) -> None:
+    """Namespace-mode commits must not delete manifests outside the target namespace."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+
+    config_repo = porcelain.init(config)
+    config_file = config_repo.get_config()
+    config_file.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
+    config_file.write_to_path()
+    config_repo.close()
+    (config / "config.toml").write_text(
+        """\
+[[simple]]
+image = "registry.example.com/team-a:1.0"
+"""
+    )
+    config_commit = _commit_all(config).decode("ascii")
+
+    porcelain.init(output)
+    cluster_role = output / "cluster" / "clusterrole-system:metrics-server.yaml"
+    cluster_role.parent.mkdir()
+    cluster_role.write_text(
+        """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:metrics-server
+rules: []
+"""
+    )
+    kube_system_role = output / "kube-system" / "role-cert-manager:leaderelection.yaml"
+    kube_system_role.parent.mkdir()
+    kube_system_role.write_text(
+        """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager:leaderelection
+  namespace: kube-system
+rules: []
+"""
+    )
+    other_namespace_config = output / "cert-manager" / "configmap-existing.yaml"
+    other_namespace_config.parent.mkdir()
+    other_namespace_config.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: existing
+  namespace: cert-manager
+"""
+    )
+    _commit_all(output)
+
+    result = api_generate(
+        config,
+        output,
+        repo_root=tmp_path,
+        namespace="team-a",
+        create_commit=True,
+    )
+
+    assert result.removed == set()
+    assert cluster_role.exists()
+    assert kube_system_role.exists()
+    assert other_namespace_config.exists()
+    assert output / "team-a" / "deployment-team-a.yaml" in result.written_paths
+
+    with Repo.discover(output) as repo:
+        commit = cast(Commit, repo[repo.head()])
+    message = commit.message.decode()
+    assert "Config remote: https://example.com/config.git" in message
+    assert f"Config commit: {config_commit}" in message
 
 
 @mock.patch(
