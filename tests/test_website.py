@@ -1021,6 +1021,43 @@ def test_generate_website_bundled_template_no_args(tmp_path: Path) -> None:
     assert "args" not in container
 
 
+def test_generate_website_image_uses_healthz_liveness_probe(tmp_path: Path) -> None:
+    """Image-backed websites should get an HTTP liveness probe on /healthz."""
+    config = WebsiteConfig(
+        name="my-app",
+        namespace="production",
+        image="nginx:latest",
+    )
+    paths = generate_website(config, tmp_path / "output")
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert container["livenessProbe"] == {"httpGet": {"path": "/healthz", "port": 8080}}
+
+
+def test_generate_website_hugo_uses_root_liveness_probe(tmp_path: Path) -> None:
+    """Hugo-backed websites should get an HTTP liveness probe on /."""
+    config = WebsiteConfig(
+        name="hugo.example.com",
+        namespace="web",
+        hugo_repo="https://github.com/user/repo",
+    )
+    images = {
+        "git_image": "alpine/git:2.47.2",
+        "hugo_image": "floryn90/hugo:0.155.3-alpine",
+        "static_web_server_image": "ghcr.io/static-web-server/static-web-server:2.36.1",
+    }
+    paths = generate_website(config, tmp_path / "output", images=images)
+
+    deployment_path = next(p for p in paths if "deployment" in p.name)
+    deployment_doc = yaml.safe_load(deployment_path.read_text())
+
+    container = deployment_doc["spec"]["template"]["spec"]["containers"][0]
+    assert container["livenessProbe"] == {"httpGet": {"path": "/", "port": 8080}}
+
+
 def test_generate_website_bundled_template_env(tmp_path: Path) -> None:
     """Bundled template should emit configured environment variables."""
     config = WebsiteConfig(

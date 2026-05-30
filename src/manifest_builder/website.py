@@ -495,6 +495,21 @@ def _inject_env_vars(doc: dict, env: dict[str, str]) -> None:
         container.setdefault("env", []).extend(_make_env_vars(env))
 
 
+def _inject_liveness_probe(doc: dict, path: str) -> None:
+    """Inject an HTTP liveness probe into Deployment containers."""
+    if doc.get("kind") != "Deployment":
+        return
+
+    pod_spec = (
+        doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    )
+    for container in pod_spec.get("containers", []):
+        container.setdefault(
+            "livenessProbe",
+            {"httpGet": {"path": path, "port": 8080}},
+        )
+
+
 def generate_website(
     config: WebsiteConfig,
     output_dir: Path,
@@ -609,6 +624,10 @@ def generate_website(
                 doc.setdefault("metadata", {}).setdefault("annotations", {})["hugo"] = (
                     config.hugo_repo
                 )
+
+    liveness_probe_path = "/" if config.hugo_repo else "/healthz"
+    for doc in docs:
+        _inject_liveness_probe(doc, liveness_probe_path)
 
     if config.env:
         for doc in docs:
