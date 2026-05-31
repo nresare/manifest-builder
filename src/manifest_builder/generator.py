@@ -988,7 +988,7 @@ def _write_documents(
         dest_dir = output_dir / subdir
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"{kind.lower()}-{name}.yaml"
+        filename = _manifest_filename(kind, name)
         output_path = dest_dir / filename
 
         with open(output_path, "w") as f:
@@ -1000,6 +1000,11 @@ def _write_documents(
         written.add(output_path)
 
     return written
+
+
+def _manifest_filename(kind: str, name: str) -> str:
+    """Return a filesystem-safe manifest filename for a Kubernetes object."""
+    return f"{kind.lower()}-{name}.yaml".replace(":", "_")
 
 
 def write_manifests(

@@ -73,6 +73,24 @@ def test_write_manifests_cluster_scoped_resource(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_write_manifests_replaces_colons_in_filenames(tmp_path: Path) -> None:
+    """Object names with colons keep their metadata but get safe filenames."""
+    content = """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:metrics-server
+rules: []
+"""
+    paths = write_manifests(content, tmp_path, "default")
+
+    assert len(paths) == 1
+    (path,) = paths
+    assert path == tmp_path / "cluster" / "clusterrole-system_metrics-server.yaml"
+    doc = yaml.safe_load(path.read_text())
+    assert doc["metadata"]["name"] == "system:metrics-server"
+
+
 def test_write_manifests_multi_document(tmp_path: Path) -> None:
     paths = write_manifests(MULTI_DOC_YAML, tmp_path, "default")
     assert len(paths) == 2
