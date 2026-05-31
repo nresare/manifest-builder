@@ -3,6 +3,8 @@
 import hashlib
 import json
 import logging
+import shutil
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,7 @@ from manifest_builder.generator import (
     plural,
 )
 from manifest_builder.git_utils import (
+    GitManifestChanges,
     create_manifest_commit,
     get_git_commit,
     get_git_head_file,
@@ -133,9 +136,17 @@ def generate(
         logger.info("Loaded %d app configuration%s", count, plural(count))
 
     images = load_images(config)
-    owned_namespaces = load_owned_namespaces(config) | load_owned_namespaces(output)
-    if namespace is not None:
+    system_roots_before: set[str] = set()
+    if namespace is None:
+        system_roots_before = _load_system_owner_roots(output)
+        owned_namespaces = load_owned_namespaces(
+            config, exclude_owner_files={"system.toml"}
+        ) | _load_non_system_owned_namespaces(output)
+        _clear_output_roots(output, system_roots_before - owned_namespaces)
+    else:
+        owned_namespaces = load_owned_namespaces(config) | load_owned_namespaces(output)
         owned_namespaces.discard(namespace)
+        _clear_output_roots(output, {namespace})
     if verbose and owned_namespaces:
         count = len(owned_namespaces)
         logger.info(
@@ -153,8 +164,10 @@ def generate(
         verbose=verbose,
         owned_namespaces=owned_namespaces,
         managed_namespaces={namespace} if namespace is not None else None,
+        cleanup=False,
     )
 
+    written_roots = _output_roots(output, written_paths)
     if namespace is not None:
         cluster_paths = _cluster_output_paths(output, written_paths)
         if cluster_paths:
@@ -165,43 +178,55 @@ def generate(
             )
         owner_path = _write_namespace_owner(output, namespace)
         written_paths.add(owner_path)
+        commit_roots = {namespace}
+        commit_paths = {output / namespace, owner_path}
+    else:
+        owner_path = _write_system_owner(output, written_roots)
+        written_paths.add(owner_path)
+        commit_roots = (system_roots_before - owned_namespaces) | written_roots
+        commit_paths = {output / root for root in commit_roots}
+        commit_paths.add(owner_path)
 
     config_commit = get_git_commit(config) if is_git_checkout(config) else None
-    result = _collect_generation_result(output, written_paths, config_commit)
+    result = _collect_generation_result(
+        output, written_paths, config_commit, commit_roots
+    )
 
     if create_commit:
         if config_commit is None:
             config_commit = get_git_commit(config)
         config_remote = get_git_tracked_remote(config)
-        commit_owned_namespaces = owned_namespaces
-        if namespace is not None:
-            commit_owned_namespaces = owned_namespaces | _non_target_output_owners(
-                output, namespace
-            )
         create_manifest_commit(
             output,
             __version__,
             config_remote,
             config_commit,
             written_paths,
-            commit_owned_namespaces,
+            commit_paths,
         )
 
     return result
 
 
 def _collect_generation_result(
-    output: Path, written_paths: set[Path], config_commit: str | None
+    output: Path,
+    written_paths: set[Path],
+    config_commit: str | None,
+    managed_roots: set[str] | None = None,
 ) -> GenerationResult:
     """Annotate changed manifests and return object-level git changes."""
     if not is_git_checkout(output):
         return GenerationResult(written_paths=written_paths)
 
     changes = get_git_manifest_changes(output)
+    if managed_roots is not None:
+        changes = _filter_manifest_changes(output, changes, managed_roots)
     deploy_id = _make_deploy_id(__version__, config_commit) if config_commit else None
     if deploy_id is not None and changes.added_or_modified:
         _annotate_manifest_files(changes.added_or_modified, deploy_id)
         changes = get_git_manifest_changes(output)
+        if managed_roots is not None:
+            changes = _filter_manifest_changes(output, changes, managed_roots)
 
     return GenerationResult(
         written_paths=written_paths,
@@ -317,14 +342,99 @@ def _write_namespace_owner(output: Path, namespace: str) -> Path:
     return owner_path
 
 
-def _non_target_output_owners(output: Path, namespace: str) -> set[str]:
-    """Return top-level output directories that namespace mode must not clean."""
-    if not output.is_dir():
+def _write_system_owner(output: Path, roots: set[str]) -> Path:
+    """Write the output roots owned by full system generation."""
+    owner_dir = output / "owners"
+    owner_dir.mkdir(parents=True, exist_ok=True)
+    owner_path = owner_dir / "system.toml"
+    namespaces = json.dumps(sorted(roots))
+    owner_path.write_text(f"namespaces = {namespaces}\n")
+    return owner_path
+
+
+def _load_system_owner_roots(output: Path) -> set[str]:
+    """Return the output roots owned by the previous system run."""
+    owner_path = output / "owners" / "system.toml"
+    if not owner_path.exists():
         return set()
-    return {
-        path.name
-        for path in output.iterdir()
-        if path.is_dir()
-        and not path.name.startswith(".")
-        and path.name not in {namespace, "owners"}
-    }
+
+    data = tomllib.loads(owner_path.read_text())
+    namespaces = data.get("namespaces", [])
+    if not isinstance(namespaces, list) or not all(
+        isinstance(namespace, str) for namespace in namespaces
+    ):
+        raise ValueError(f"'namespaces' must be a list of strings in {owner_path}")
+    return {_validate_output_root(root, owner_path) for root in namespaces}
+
+
+def _load_non_system_owned_namespaces(output: Path) -> set[str]:
+    """Load namespace owners without treating system-owned roots as external."""
+    return load_owned_namespaces(output, exclude_owner_files={"system.toml"})
+
+
+def _clear_output_roots(output: Path, roots: set[str]) -> None:
+    """Delete all existing content in the owned output roots."""
+    for root in sorted(roots):
+        _validate_output_root(root, output / "owners" / "system.toml")
+        root_path = output / root
+        if not root_path.exists():
+            continue
+        if not root_path.is_dir() or root_path.is_symlink():
+            raise ValueError(f"Owned output root is not a directory: {root_path}")
+        for child in sorted(root_path.iterdir()):
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            logger.debug("Deleted owned output path before generation: %s", child)
+
+
+def _output_roots(output: Path, paths: set[Path]) -> set[str]:
+    """Return top-level output roots touched by generated manifest paths."""
+    roots: set[str] = set()
+    for path in paths:
+        try:
+            rel_parts = path.relative_to(output).parts
+        except ValueError:
+            continue
+        if not rel_parts or rel_parts[0] == "owners":
+            continue
+        roots.add(_validate_output_root(rel_parts[0], path))
+    return roots
+
+
+def _validate_output_root(root: str, source: Path) -> str:
+    """Validate that an owned output root is a single safe path component."""
+    if (
+        not root
+        or root in {".", "..", "owners"}
+        or root.startswith(".")
+        or Path(root).parts != (root,)
+    ):
+        raise ValueError(f"Invalid output root {root!r} in {source}")
+    return root
+
+
+def _filter_manifest_changes(
+    output: Path, changes: GitManifestChanges, managed_roots: set[str]
+) -> GitManifestChanges:
+    """Limit git change reporting to the roots owned by this invocation."""
+    return GitManifestChanges(
+        added=_filter_paths_to_roots(output, changes.added, managed_roots),
+        modified=_filter_paths_to_roots(output, changes.modified, managed_roots),
+        deleted=_filter_paths_to_roots(output, changes.deleted, managed_roots),
+    )
+
+
+def _filter_paths_to_roots(
+    output: Path, paths: set[Path], managed_roots: set[str]
+) -> set[Path]:
+    return {path for path in paths if _path_output_root(output, path) in managed_roots}
+
+
+def _path_output_root(output: Path, path: Path) -> str | None:
+    try:
+        rel_parts = path.relative_to(output).parts
+    except ValueError:
+        return None
+    return rel_parts[0] if rel_parts else None

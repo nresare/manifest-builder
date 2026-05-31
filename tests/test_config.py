@@ -2070,6 +2070,18 @@ def test_load_owned_namespaces_combines_keys_across_files(tmp_path: Path) -> Non
     }
 
 
+def test_load_owned_namespaces_can_exclude_owner_files(tmp_path: Path) -> None:
+    """Callers can ignore owners that are handled by a different mode."""
+    owners_dir = tmp_path / "conf" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "system.toml").write_text('namespaces = ["cluster", "team-a"]\n')
+    (owners_dir / "team-b.toml").write_text('namespace = "team-b"\n')
+
+    assert load_owned_namespaces(
+        tmp_path / "conf", exclude_owner_files={"system.toml"}
+    ) == {"team-b"}
+
+
 def test_load_owned_namespaces_rejects_non_string_namespace(tmp_path: Path) -> None:
     """A non-string 'namespace' value is a configuration error."""
     owners_dir = tmp_path / "conf" / "owners"

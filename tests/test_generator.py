@@ -572,10 +572,14 @@ def test_ensure_namespaces_skips_when_namespace_in_cluster_dir(
 
 def test_ensure_namespaces_multiple_namespaces(tmp_path: Path) -> None:
     """Each namespace directory gets its own Namespace manifest."""
-    for ns in ("ns-a", "ns-b"):
-        (tmp_path / ns).mkdir()
-
     written: dict[Path, str] = {}
+    for ns in ("ns-a", "ns-b"):
+        ns_dir = tmp_path / ns
+        ns_dir.mkdir()
+        manifest = ns_dir / f"deployment-{ns}.yaml"
+        manifest.write_text("placeholder")
+        written[manifest] = ns
+
     new = _ensure_namespaces(tmp_path, written)
 
     assert tmp_path / "ns-a" / "namespace-ns-a.yaml" in new

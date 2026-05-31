@@ -582,6 +582,7 @@ def generate_manifests(
     verbose: bool = False,
     owned_namespaces: set[str] | None = None,
     managed_namespaces: set[str] | None = None,
+    cleanup: bool = True,
 ) -> set[Path]:
     """
     Generate manifests for all configured apps.
@@ -598,6 +599,7 @@ def generate_manifests(
             fails if any output would land in one of them.
         managed_namespaces: If set, cleanup and automatic Namespace creation are
             limited to these namespace directories.
+        cleanup: If True, remove stale YAML files after generation.
 
     Returns:
         Set of paths that were written
@@ -697,10 +699,10 @@ def generate_manifests(
     )
     written_paths.update(namespace_paths)
 
-    # Remove any stale files left over from the previous runs
-    _cleanup_stale_files(
-        output_dir, written_paths, owned_namespaces, managed_namespaces
-    )
+    if cleanup:
+        _cleanup_stale_files(
+            output_dir, written_paths, owned_namespaces, managed_namespaces
+        )
 
     if cache_stats.hits or cache_stats.misses:
         logger.info(
@@ -710,8 +712,12 @@ def generate_manifests(
 
     total = len(written_paths)
     summary = f"Done! Generated {total} manifest{plural(total)}"
-    removed = _count_removed_files(
-        output_dir, written_paths, owned_namespaces, managed_namespaces
+    removed = (
+        _count_removed_files(
+            output_dir, written_paths, owned_namespaces, managed_namespaces
+        )
+        if cleanup
+        else 0
     )
     if removed:
         summary += f", removed {removed} stale file{plural(removed)}"
@@ -754,22 +760,24 @@ def _ensure_namespaces(
         return {}
 
     owned = owned_namespaces or set()
+    candidate_namespaces = sorted(
+        namespace
+        for namespace in {_path_namespace(path, output_dir) for path in written_paths}
+        if namespace is not None
+    )
     new_paths: dict[Path, str] = {}
-    for ns_dir in sorted(output_dir.iterdir()):
+    for ns_name in candidate_namespaces:
         if (
-            not ns_dir.is_dir()
-            or ns_dir.name == "cluster"
-            or ns_dir.name == "kube-system"
-            or ns_dir.name == "owners"
-            or ns_dir.name.startswith(".")
-            or ns_dir.name in owned
-            or (
-                managed_namespaces is not None and ns_dir.name not in managed_namespaces
-            )
+            ns_name == "cluster"
+            or ns_name == "kube-system"
+            or ns_name == "owners"
+            or ns_name.startswith(".")
+            or ns_name in owned
+            or (managed_namespaces is not None and ns_name not in managed_namespaces)
         ):
             continue
 
-        ns_name = ns_dir.name
+        ns_dir = output_dir / ns_name
         ns_filename = f"namespace-{ns_name}.yaml"
 
         # Skip if a Namespace was already written for this namespace
