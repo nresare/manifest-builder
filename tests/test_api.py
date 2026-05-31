@@ -7,11 +7,13 @@ from unittest import mock
 from unittest.mock import call
 
 from dulwich import porcelain
+import pytest
 import yaml
 
 from manifest_builder import GenerationResult, __version__, generate
 from manifest_builder.api import (
     DEPLOY_ID_ANNOTATION,
+    _load_system_owner_roots,
     _make_deploy_id,
     generate as api_generate,
 )
@@ -67,7 +69,7 @@ metadata:
     )
     owners_dir = output / "owners"
     owners_dir.mkdir()
-    (owners_dir / "system.toml").write_text('namespaces = ["idcat"]\n')
+    (owners_dir / "system.toml").write_text('owned = "idcat"\n')
     _commit_all(output)
 
     result = api_generate(config, output, repo_root=tmp_path)
@@ -140,7 +142,7 @@ def test_generate_accepts_config_and_output_paths(
 
     system_owner = output / "owners" / "system.toml"
     assert result.written_paths == {generated, system_owner}
-    assert system_owner.read_text() == 'namespaces = ["app"]\n'
+    assert system_owner.read_text() == 'owned = ["app"]\n'
     mock_load_helmfile.assert_called_once_with(config / "releases.yaml")
     mock_load_configs.assert_called_once_with(
         config,
@@ -195,7 +197,7 @@ def test_generate_namespace_mode_writes_owner_file(
 
     owner = output / "owners" / "team-a.toml"
     assert owner in result.written_paths
-    assert owner.read_text() == 'namespace = "team-a"\n'
+    assert owner.read_text() == 'owned = "team-a"\n'
     mock_load_configs.assert_called_once_with(
         config,
         mock.ANY,
@@ -278,6 +280,34 @@ def test_generate_image_requires_namespace(tmp_path: Path) -> None:
     assert error == "generate(image=...) can only be used when namespace is set"
 
 
+def test_load_system_owner_roots_accepts_owned_string(tmp_path: Path) -> None:
+    """System ownership may contain a single owned output root."""
+    owners_dir = tmp_path / "output" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "system.toml").write_text('owned = "cluster"\n')
+
+    assert _load_system_owner_roots(tmp_path / "output") == {"cluster"}
+
+
+def test_load_system_owner_roots_accepts_owned_list(tmp_path: Path) -> None:
+    """System ownership may contain a list of owned output roots."""
+    owners_dir = tmp_path / "output" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "system.toml").write_text('owned = ["cluster", "team-a"]\n')
+
+    assert _load_system_owner_roots(tmp_path / "output") == {"cluster", "team-a"}
+
+
+def test_load_system_owner_roots_rejects_invalid_owned_value(tmp_path: Path) -> None:
+    """System ownership must be a string or a list of strings."""
+    owners_dir = tmp_path / "output" / "owners"
+    owners_dir.mkdir(parents=True)
+    (owners_dir / "system.toml").write_text("owned = 42\n")
+
+    with pytest.raises(ValueError, match="'owned' must be a string or list"):
+        _load_system_owner_roots(tmp_path / "output")
+
+
 def test_system_mode_reconciles_system_owner_roots_and_commit(
     tmp_path: Path,
 ) -> None:
@@ -325,7 +355,7 @@ metadata:
     )
     owners_dir = output / "owners"
     owners_dir.mkdir()
-    (owners_dir / "system.toml").write_text('namespaces = ["old-ns", "team-a"]\n')
+    (owners_dir / "system.toml").write_text('owned = ["old-ns", "team-a"]\n')
     _commit_all(output)
 
     result = api_generate(config, output, repo_root=tmp_path, create_commit=True)
@@ -333,7 +363,7 @@ metadata:
     assert output / "team-a" / "deployment-team-a.yaml" in result.written_paths
     assert not team_stale.exists()
     assert not old_stale.exists()
-    assert (owners_dir / "system.toml").read_text() == 'namespaces = ["team-a"]\n'
+    assert (owners_dir / "system.toml").read_text() == 'owned = ["team-a"]\n'
     assert result.removed == {
         KubernetesObjectRef("ConfigMap", "old-ns", "old"),
         KubernetesObjectRef("ConfigMap", "team-a", "old"),

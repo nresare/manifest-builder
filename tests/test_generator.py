@@ -549,7 +549,7 @@ def test_ensure_namespaces_skips_owners_directory(tmp_path: Path) -> None:
     """The owners/ directory contains ownership TOML, not Kubernetes resources."""
     owners_dir = tmp_path / "owners"
     owners_dir.mkdir()
-    (owners_dir / "team-a.toml").write_text('namespace = "team-a"\n')
+    (owners_dir / "team-a.toml").write_text('owned = "team-a"\n')
 
     new = _ensure_namespaces(tmp_path, {})
 

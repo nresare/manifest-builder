@@ -2033,34 +2033,30 @@ def test_load_owned_namespaces_returns_empty_when_dir_missing(tmp_path: Path) ->
     assert load_owned_namespaces(conf_dir) == set()
 
 
-def test_load_owned_namespaces_single_namespace_key(tmp_path: Path) -> None:
-    """A 'namespace' string adds one namespace to the owned set."""
+def test_load_owned_namespaces_owned_string(tmp_path: Path) -> None:
+    """An 'owned' string adds one output root to the owned set."""
     owners_dir = tmp_path / "conf" / "owners"
     owners_dir.mkdir(parents=True)
-    (owners_dir / "team-a.toml").write_text('namespace = "team-a"\n')
+    (owners_dir / "team-a.toml").write_text('owned = "team-a"\n')
 
     assert load_owned_namespaces(tmp_path / "conf") == {"team-a"}
 
 
-def test_load_owned_namespaces_namespaces_list(tmp_path: Path) -> None:
-    """A 'namespaces' list adds each entry to the owned set."""
+def test_load_owned_namespaces_owned_list(tmp_path: Path) -> None:
+    """An 'owned' list adds each entry to the owned set."""
     owners_dir = tmp_path / "conf" / "owners"
     owners_dir.mkdir(parents=True)
-    (owners_dir / "platform.toml").write_text(
-        'namespaces = ["monitoring", "logging"]\n'
-    )
+    (owners_dir / "platform.toml").write_text('owned = ["monitoring", "logging"]\n')
 
     assert load_owned_namespaces(tmp_path / "conf") == {"monitoring", "logging"}
 
 
 def test_load_owned_namespaces_combines_keys_across_files(tmp_path: Path) -> None:
-    """Both keys may appear, possibly in different files, and accumulate."""
+    """Owner files accumulate into a single owned set."""
     owners_dir = tmp_path / "conf" / "owners"
     owners_dir.mkdir(parents=True)
-    (owners_dir / "team-a.toml").write_text(
-        'namespace = "team-a"\nnamespaces = ["alpha", "beta"]\n'
-    )
-    (owners_dir / "team-b.toml").write_text('namespace = "team-b"\n')
+    (owners_dir / "team-a.toml").write_text('owned = ["team-a", "alpha", "beta"]\n')
+    (owners_dir / "team-b.toml").write_text('owned = "team-b"\n')
 
     assert load_owned_namespaces(tmp_path / "conf") == {
         "team-a",
@@ -2074,31 +2070,21 @@ def test_load_owned_namespaces_can_exclude_owner_files(tmp_path: Path) -> None:
     """Callers can ignore owners that are handled by a different mode."""
     owners_dir = tmp_path / "conf" / "owners"
     owners_dir.mkdir(parents=True)
-    (owners_dir / "system.toml").write_text('namespaces = ["cluster", "team-a"]\n')
-    (owners_dir / "team-b.toml").write_text('namespace = "team-b"\n')
+    (owners_dir / "system.toml").write_text('owned = ["cluster", "team-a"]\n')
+    (owners_dir / "team-b.toml").write_text('owned = "team-b"\n')
 
     assert load_owned_namespaces(
         tmp_path / "conf", exclude_owner_files={"system.toml"}
     ) == {"team-b"}
 
 
-def test_load_owned_namespaces_rejects_non_string_namespace(tmp_path: Path) -> None:
-    """A non-string 'namespace' value is a configuration error."""
+def test_load_owned_namespaces_rejects_invalid_owned_value(tmp_path: Path) -> None:
+    """An 'owned' value that is not a string or list is a configuration error."""
     owners_dir = tmp_path / "conf" / "owners"
     owners_dir.mkdir(parents=True)
-    (owners_dir / "bad.toml").write_text("namespace = 42\n")
+    (owners_dir / "bad.toml").write_text("owned = 42\n")
 
-    with pytest.raises(ValueError, match="'namespace' must be a string"):
-        load_owned_namespaces(tmp_path / "conf")
-
-
-def test_load_owned_namespaces_rejects_non_list_namespaces(tmp_path: Path) -> None:
-    """A non-list 'namespaces' value is a configuration error."""
-    owners_dir = tmp_path / "conf" / "owners"
-    owners_dir.mkdir(parents=True)
-    (owners_dir / "bad.toml").write_text('namespaces = "not-a-list"\n')
-
-    with pytest.raises(ValueError, match="'namespaces' must be a list of strings"):
+    with pytest.raises(ValueError, match="'owned' must be a string or list"):
         load_owned_namespaces(tmp_path / "conf")
 
 
@@ -2107,6 +2093,6 @@ def test_load_owned_namespaces_ignores_non_toml_files(tmp_path: Path) -> None:
     owners_dir = tmp_path / "conf" / "owners"
     owners_dir.mkdir(parents=True)
     (owners_dir / "README.md").write_text("# notes\n")
-    (owners_dir / "team-a.toml").write_text('namespace = "team-a"\n')
+    (owners_dir / "team-a.toml").write_text('owned = "team-a"\n')
 
     assert load_owned_namespaces(tmp_path / "conf") == {"team-a"}

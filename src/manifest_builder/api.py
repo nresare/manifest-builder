@@ -338,7 +338,7 @@ def _write_namespace_owner(output: Path, namespace: str) -> Path:
     owner_dir = output / "owners"
     owner_dir.mkdir(parents=True, exist_ok=True)
     owner_path = owner_dir / f"{namespace}.toml"
-    owner_path.write_text(f"namespace = {json.dumps(namespace)}\n")
+    owner_path.write_text(f"owned = {json.dumps(namespace)}\n")
     return owner_path
 
 
@@ -347,8 +347,8 @@ def _write_system_owner(output: Path, roots: set[str]) -> Path:
     owner_dir = output / "owners"
     owner_dir.mkdir(parents=True, exist_ok=True)
     owner_path = owner_dir / "system.toml"
-    namespaces = json.dumps(sorted(roots))
-    owner_path.write_text(f"namespaces = {namespaces}\n")
+    owned = json.dumps(sorted(roots))
+    owner_path.write_text(f"owned = {owned}\n")
     return owner_path
 
 
@@ -359,12 +359,12 @@ def _load_system_owner_roots(output: Path) -> set[str]:
         return set()
 
     data = tomllib.loads(owner_path.read_text())
-    namespaces = data.get("namespaces", [])
-    if not isinstance(namespaces, list) or not all(
-        isinstance(namespace, str) for namespace in namespaces
-    ):
-        raise ValueError(f"'namespaces' must be a list of strings in {owner_path}")
-    return {_validate_output_root(root, owner_path) for root in namespaces}
+    owned = data.get("owned", [])
+    if isinstance(owned, str):
+        owned = [owned]
+    if not isinstance(owned, list) or not all(isinstance(root, str) for root in owned):
+        raise ValueError(f"'owned' must be a string or list of strings in {owner_path}")
+    return {_validate_output_root(root, owner_path) for root in owned}
 
 
 def _load_non_system_owned_namespaces(output: Path) -> set[str]:
