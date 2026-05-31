@@ -13,11 +13,12 @@ import yaml
 from manifest_builder import GenerationResult, __version__, generate
 from manifest_builder.api import (
     DEPLOY_ID_ANNOTATION,
+    _collect_generation_result,
     _load_system_owner_roots,
     _make_deploy_id,
     generate as api_generate,
 )
-from manifest_builder.git_utils import GitManifestChanges
+from manifest_builder.git_utils import GitManifestChanges, get_git_manifest_changes
 from manifest_builder.result import KubernetesObjectRef
 
 
@@ -88,6 +89,143 @@ metadata:
             continue
         doc = yaml.safe_load(path.read_text())
         assert doc["metadata"]["annotations"][DEPLOY_ID_ANNOTATION] == deploy_id
+
+
+def test_generate_ignores_deploy_id_only_manifest_changes(tmp_path: Path) -> None:
+    """A new deploy id alone should not make otherwise unchanged objects modified."""
+    output = tmp_path / "output"
+    output.mkdir()
+    porcelain.init(output)
+    manifest = output / "idcat" / "configmap-settings.yaml"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: idcat
+  annotations:
+    noa.re/deploy-id: old-deploy-id
+data:
+  key: value
+"""
+    )
+    _commit_all(output, b"generated manifests")
+    manifest.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: idcat
+data:
+  key: value
+"""
+    )
+    config_commit = "a" * 40
+
+    result = _collect_generation_result(output, {manifest}, config_commit, {"idcat"})
+
+    assert result.deploy_id == _make_deploy_id(__version__, config_commit)
+    assert result.created_or_modified == set()
+    assert result.removed == set()
+    assert get_git_manifest_changes(output) == GitManifestChanges()
+
+
+def test_generate_restores_deploy_id_only_changes_without_config_commit(
+    tmp_path: Path,
+) -> None:
+    """Git-backed output preserves existing deploy ids when no new id is available."""
+    output = tmp_path / "output"
+    output.mkdir()
+    porcelain.init(output)
+    manifest = output / "idcat" / "configmap-settings.yaml"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: idcat
+  annotations:
+    noa.re/deploy-id: old-deploy-id
+data:
+  key: value
+"""
+    )
+    _commit_all(output, b"generated manifests")
+    manifest.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: idcat
+data:
+  key: value
+"""
+    )
+
+    result = _collect_generation_result(output, {manifest}, None, {"idcat"})
+
+    assert result.deploy_id is None
+    assert result.created_or_modified == set()
+    assert result.removed == set()
+    assert get_git_manifest_changes(output) == GitManifestChanges()
+    assert (
+        DEPLOY_ID_ANNOTATION
+        in yaml.safe_load(manifest.read_text())["metadata"]["annotations"]
+    )
+
+
+def test_generate_restores_deploy_id_only_changes_with_unresolved_output_path(
+    tmp_path: Path,
+) -> None:
+    """Managed-root filtering handles output paths containing parent segments."""
+    output = tmp_path / "output"
+    caller = tmp_path / "caller"
+    output.mkdir()
+    caller.mkdir()
+    porcelain.init(output)
+    manifest = output / "idcat" / "configmap-settings.yaml"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: idcat
+  annotations:
+    noa.re/deploy-id: old-deploy-id
+data:
+  key: value
+"""
+    )
+    _commit_all(output, b"generated manifests")
+    manifest.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: idcat
+data:
+  key: value
+"""
+    )
+
+    result = _collect_generation_result(
+        caller / ".." / "output",
+        {manifest},
+        None,
+        {"idcat"},
+    )
+
+    assert result.created_or_modified == set()
+    assert get_git_manifest_changes(output) == GitManifestChanges()
 
 
 @mock.patch("manifest_builder.api.generate_manifests")

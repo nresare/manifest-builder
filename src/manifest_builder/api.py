@@ -221,6 +221,12 @@ def _collect_generation_result(
     changes = get_git_manifest_changes(output)
     if managed_roots is not None:
         changes = _filter_manifest_changes(output, changes, managed_roots)
+    if changes.modified:
+        _restore_deploy_id_only_changes(changes.modified)
+        changes = get_git_manifest_changes(output)
+        if managed_roots is not None:
+            changes = _filter_manifest_changes(output, changes, managed_roots)
+
     deploy_id = _make_deploy_id(__version__, config_commit) if config_commit else None
     if deploy_id is not None and changes.added_or_modified:
         _annotate_manifest_files(changes.added_or_modified, deploy_id)
@@ -239,6 +245,38 @@ def _collect_generation_result(
 def _make_deploy_id(version: str, config_commit: str) -> str:
     """Return a deterministic 64-bit deploy id as 16 hex characters."""
     return hashlib.sha256(f"{version}\0{config_commit}".encode()).hexdigest()[:16]
+
+
+def _restore_deploy_id_only_changes(paths: set[Path]) -> None:
+    """Restore modified files whose only semantic diff is the deploy-id annotation."""
+    for path in sorted(paths):
+        head_content = get_git_head_file(path)
+        working_content = path.read_text()
+        if _manifests_equal_ignoring_deploy_id(head_content.decode(), working_content):
+            path.write_bytes(head_content)
+
+
+def _manifests_equal_ignoring_deploy_id(left: str, right: str) -> bool:
+    """Return whether two manifest streams match aside from deploy-id annotations."""
+    return _without_deploy_id(_load_all_yaml(left)) == _without_deploy_id(
+        _load_all_yaml(right)
+    )
+
+
+def _without_deploy_id(documents: list[Any]) -> list[Any]:
+    for doc in documents:
+        if not isinstance(doc, dict) or not doc.get("kind"):
+            continue
+        metadata = doc.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        annotations = metadata.get("annotations")
+        if not isinstance(annotations, dict):
+            continue
+        annotations.pop(DEPLOY_ID_ANNOTATION, None)
+        if not annotations:
+            del metadata["annotations"]
+    return documents
 
 
 def _annotate_manifest_files(paths: set[Path], deploy_id: str) -> None:
@@ -434,7 +472,7 @@ def _filter_paths_to_roots(
 
 def _path_output_root(output: Path, path: Path) -> str | None:
     try:
-        rel_parts = path.relative_to(output).parts
+        rel_parts = path.resolve().relative_to(output.resolve()).parts
     except ValueError:
         return None
     return rel_parts[0] if rel_parts else None
