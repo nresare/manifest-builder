@@ -40,26 +40,26 @@ from manifest_builder import generate
 written_paths = generate(Path("conf"), Path("output"))
 ```
 
-## Externally-owned namespaces
+## Externally-owned output roots
 
 When the output repository is shared with other services or pipelines that
-make their own commits, manifest-builder can be told which namespace
+make their own commits, manifest-builder can be told which top-level output
 directories it does not own. Files in those directories are left alone during
 cleanup, and generation fails fast if any output would land in one of them.
 
 To declare ownership, add an `owners/` directory to your config directory and
-drop one or more TOML files into it. Each file may set either of:
+drop one or more TOML files into it. Each file may set:
 
 ```toml
-# A single namespace owned by another pipeline:
-namespace = "team-a"
+# A single output root owned by another pipeline:
+owned = "team-a"
 
-# Or a list of namespaces:
-namespaces = ["monitoring", "logging"]
+# Or a list of output roots:
+owned = ["cluster", "monitoring", "logging"]
 ```
 
-Both keys may appear in the same file, and entries from all `owners/*.toml`
-files are merged into a single set of externally-owned namespaces.
+Entries from all `owners/*.toml` files are merged into a single set of
+externally-owned output roots.
 
 ## License
 

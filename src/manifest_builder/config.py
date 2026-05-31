@@ -257,10 +257,10 @@ def load_images(config_dir: Path) -> dict[str, str]:
 def load_owned_namespaces(
     config_dir: Path, *, exclude_owner_files: set[str] | None = None
 ) -> set[str]:
-    """Load the set of namespaces owned by other services or pipelines.
+    """Load the set of output roots owned by other services or pipelines.
 
-    Reads ``<config_dir>/owners/*.toml``. Each file may declare ownership via
-    a ``namespace`` string or a ``namespaces`` list of strings (or both).
+    Reads ``<config_dir>/owners/*.toml``. Each file may declare ownership via an
+    ``owned`` string or list of strings.
     Returns an empty set if the ``owners`` directory does not exist.
     """
     owners_dir = config_dir / "owners"
@@ -274,21 +274,19 @@ def load_owned_namespaces(
             continue
         data = tomllib.loads(toml_file.read_text())
 
-        ns = data.get("namespace")
-        if ns is not None:
-            if not isinstance(ns, str):
-                raise ValueError(f"'namespace' must be a string in {toml_file}")
-            owned.add(ns)
-
-        ns_list = data.get("namespaces")
-        if ns_list is not None:
-            if not isinstance(ns_list, list) or not all(
-                isinstance(n, str) for n in ns_list
-            ):
-                raise ValueError(
-                    f"'namespaces' must be a list of strings in {toml_file}"
-                )
-            owned.update(ns_list)
+        owner_roots = data.get("owned")
+        if owner_roots is None:
+            continue
+        if isinstance(owner_roots, str):
+            owned.add(owner_roots)
+            continue
+        if not isinstance(owner_roots, list) or not all(
+            isinstance(root, str) for root in owner_roots
+        ):
+            raise ValueError(
+                f"'owned' must be a string or list of strings in {toml_file}"
+            )
+        owned.update(owner_roots)
 
     return owned
 
