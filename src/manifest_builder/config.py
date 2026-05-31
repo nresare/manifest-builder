@@ -254,7 +254,9 @@ def load_images(config_dir: Path) -> dict[str, str]:
     return result
 
 
-def load_owned_namespaces(config_dir: Path) -> set[str]:
+def load_owned_namespaces(
+    config_dir: Path, *, exclude_owner_files: set[str] | None = None
+) -> set[str]:
     """Load the set of namespaces owned by other services or pipelines.
 
     Reads ``<config_dir>/owners/*.toml``. Each file may declare ownership via
@@ -265,8 +267,11 @@ def load_owned_namespaces(config_dir: Path) -> set[str]:
     if not owners_dir.is_dir():
         return set()
 
+    excluded = exclude_owner_files or set()
     owned: set[str] = set()
     for toml_file in sorted(owners_dir.glob("*.toml")):
+        if toml_file.name in excluded:
+            continue
         data = tomllib.loads(toml_file.read_text())
 
         ns = data.get("namespace")

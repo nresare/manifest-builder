@@ -65,6 +65,9 @@ metadata:
   namespace: idcat
 """
     )
+    owners_dir = output / "owners"
+    owners_dir.mkdir()
+    (owners_dir / "system.toml").write_text('namespaces = ["idcat"]\n')
     _commit_all(output)
 
     result = api_generate(config, output, repo_root=tmp_path)
@@ -79,6 +82,8 @@ metadata:
     assert result.removed == {KubernetesObjectRef("ConfigMap", "idcat", "old")}
 
     for path in result.written_paths:
+        if path.suffix != ".yaml":
+            continue
         doc = yaml.safe_load(path.read_text())
         assert doc["metadata"]["annotations"][DEPLOY_ID_ANNOTATION] == deploy_id
 
@@ -107,9 +112,7 @@ def test_create_commit_requires_output_git_checkout(
     mock_generate_manifests.assert_not_called()
 
 
-@mock.patch(
-    "manifest_builder.api.generate_manifests", return_value={Path("/out/app.yaml")}
-)
+@mock.patch("manifest_builder.api.generate_manifests")
 @mock.patch("manifest_builder.api.load_owned_namespaces", return_value={"owned"})
 @mock.patch("manifest_builder.api.load_images", return_value={"app": "image"})
 @mock.patch("manifest_builder.api.resolve_configs", return_value=["resolved"])
@@ -130,10 +133,14 @@ def test_generate_accepts_config_and_output_paths(
     config.mkdir()
     output.mkdir()
     (config / "releases.yaml").write_text("releases: []\n")
+    generated = output / "app" / "app.yaml"
+    mock_generate_manifests.return_value = {generated}
 
     result = api_generate(config, output, repo_root=tmp_path)
 
-    assert result.written_paths == {Path("/out/app.yaml")}
+    system_owner = output / "owners" / "system.toml"
+    assert result.written_paths == {generated, system_owner}
+    assert system_owner.read_text() == 'namespaces = ["app"]\n'
     mock_load_helmfile.assert_called_once_with(config / "releases.yaml")
     mock_load_configs.assert_called_once_with(
         config,
@@ -144,7 +151,12 @@ def test_generate_accepts_config_and_output_paths(
     )
     mock_resolve_configs.assert_called_once_with(["loaded"], None)
     mock_load_images.assert_called_once_with(config)
-    mock_load_owned_namespaces.assert_has_calls([call(config), call(output)])
+    mock_load_owned_namespaces.assert_has_calls(
+        [
+            call(config, exclude_owner_files={"system.toml"}),
+            call(output, exclude_owner_files={"system.toml"}),
+        ]
+    )
     mock_generate_manifests.assert_called_once_with(
         handlers=["resolved"],
         output_dir=output,
@@ -153,6 +165,7 @@ def test_generate_accepts_config_and_output_paths(
         verbose=False,
         owned_namespaces={"owned"},
         managed_namespaces=None,
+        cleanup=False,
     )
 
 
@@ -199,6 +212,7 @@ def test_generate_namespace_mode_writes_owner_file(
         verbose=False,
         owned_namespaces=set(),
         managed_namespaces={"team-a"},
+        cleanup=False,
     )
 
 
@@ -262,6 +276,71 @@ def test_generate_image_requires_namespace(tmp_path: Path) -> None:
         raise AssertionError("generate() should reject image without namespace")
 
     assert error == "generate(image=...) can only be used when namespace is set"
+
+
+def test_system_mode_reconciles_system_owner_roots_and_commit(
+    tmp_path: Path,
+) -> None:
+    """System mode clears previously owned roots and syncs owners/system.toml."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    config_repo = porcelain.init(config)
+    config_file = config_repo.get_config()
+    config_file.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
+    config_file.write_to_path()
+    config_repo.close()
+    (config / "config.toml").write_text(
+        """\
+[[simple]]
+namespace = "team-a"
+image = "registry.example.com/team-a:1.0"
+"""
+    )
+    _commit_all(config)
+
+    porcelain.init(output)
+    team_stale = output / "team-a" / "configmap-old.yaml"
+    team_stale.parent.mkdir()
+    team_stale.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: old
+  namespace: team-a
+"""
+    )
+    old_stale = output / "old-ns" / "configmap-old.yaml"
+    old_stale.parent.mkdir()
+    old_stale.write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: old
+  namespace: old-ns
+"""
+    )
+    owners_dir = output / "owners"
+    owners_dir.mkdir()
+    (owners_dir / "system.toml").write_text('namespaces = ["old-ns", "team-a"]\n')
+    _commit_all(output)
+
+    result = api_generate(config, output, repo_root=tmp_path, create_commit=True)
+
+    assert output / "team-a" / "deployment-team-a.yaml" in result.written_paths
+    assert not team_stale.exists()
+    assert not old_stale.exists()
+    assert (owners_dir / "system.toml").read_text() == 'namespaces = ["team-a"]\n'
+    assert result.removed == {
+        KubernetesObjectRef("ConfigMap", "old-ns", "old"),
+        KubernetesObjectRef("ConfigMap", "team-a", "old"),
+    }
+    status = porcelain.status(output)
+    assert status.unstaged == []
+    assert status.staged == {"add": [], "delete": [], "modify": []}
 
 
 @mock.patch("manifest_builder.api.generate_manifests")
@@ -331,7 +410,7 @@ def test_namespace_mode_commit_preserves_non_target_directories(
     mock_create_manifest_commit: mock.Mock,
     tmp_path: Path,
 ) -> None:
-    """Commit cleanup also treats non-target output directories as protected."""
+    """Namespace-mode commits stage only the target namespace and owner file."""
     mock_get_git_manifest_changes.return_value = GitManifestChanges()
     del (
         mock_load_helmfile,
@@ -368,7 +447,61 @@ def test_namespace_mode_commit_preserves_non_target_directories(
         "config.git",
         "abc123",
     )
-    assert mock_create_manifest_commit.call_args.args[5] == {"team-b", "cluster"}
+    assert mock_create_manifest_commit.call_args.args[5] == {
+        output / "team-a",
+        output / "owners" / "team-a.toml",
+    }
+
+
+def test_namespace_mode_commit_does_not_stage_preexisting_cluster_deletion(
+    tmp_path: Path,
+) -> None:
+    """Namespace mode must not commit unrelated deletions already in the checkout."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    config_repo = porcelain.init(config)
+    config_file = config_repo.get_config()
+    config_file.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
+    config_file.write_to_path()
+    config_repo.close()
+    (config / "config.toml").write_text(
+        """\
+[[simple]]
+image = "registry.example.com/team-a:1.0"
+"""
+    )
+    _commit_all(config)
+
+    porcelain.init(output)
+    protected = output / "cluster" / "clusterrole-system:metrics-server.yaml"
+    protected.parent.mkdir()
+    protected.write_text(
+        """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:metrics-server
+rules: []
+"""
+    )
+    _commit_all(output)
+    protected.unlink()
+
+    result = api_generate(
+        config,
+        output,
+        repo_root=tmp_path,
+        namespace="team-a",
+        create_commit=True,
+    )
+
+    assert result.removed == set()
+    assert output / "team-a" / "deployment-team-a.yaml" in result.written_paths
+    status = porcelain.status(output)
+    assert status.staged == {"add": [], "delete": [], "modify": []}
+    assert status.unstaged == [b"cluster/clusterrole-system:metrics-server.yaml"]
 
 
 @mock.patch(

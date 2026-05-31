@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: The manifest-builder contributors
-"""Tests for git commit cleanup utilities."""
+"""Tests for git utilities."""
 
 import logging
 from pathlib import Path
@@ -12,8 +12,6 @@ from dulwich.repo import Repo
 import pytest
 
 from manifest_builder.git_utils import (
-    _prepare_manifest_changes,
-    _remove_namespace_only_directories,
     create_manifest_commit,
     get_git_tracked_remote,
     is_git_checkout,
@@ -30,44 +28,6 @@ def _commit_all(path: Path, message: bytes = b"commit") -> bytes:
         author=b"Test User <test@example.com>",
         committer=b"Test User <test@example.com>",
     )
-
-
-def test_remove_namespace_only_directories_prunes_orphaned_namespace(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """A namespace directory with only namespace-<name>.yaml is removed."""
-    namespace_dir = tmp_path / "surreal3"
-    namespace_dir.mkdir()
-    namespace_manifest = namespace_dir / "namespace-surreal3.yaml"
-    namespace_manifest.write_text("apiVersion: v1\nkind: Namespace\n")
-
-    with caplog.at_level(logging.DEBUG, logger="manifest_builder.git_utils"):
-        _remove_namespace_only_directories(tmp_path)
-
-    assert not namespace_manifest.exists()
-    assert not namespace_dir.exists()
-    assert (
-        "Deleted namespace-only manifest during commit cleanup: "
-        "surreal3/namespace-surreal3.yaml"
-    ) in caplog.messages
-
-
-def test_remove_namespace_only_directories_keeps_namespace_with_other_manifests(
-    tmp_path: Path,
-) -> None:
-    """Namespace directories with workload manifests are preserved."""
-    namespace_dir = tmp_path / "surreal3"
-    namespace_dir.mkdir()
-    namespace_manifest = namespace_dir / "namespace-surreal3.yaml"
-    namespace_manifest.write_text("apiVersion: v1\nkind: Namespace\n")
-    workload_manifest = namespace_dir / "deployment-app.yaml"
-    workload_manifest.write_text("apiVersion: apps/v1\nkind: Deployment\n")
-
-    _remove_namespace_only_directories(tmp_path)
-
-    assert namespace_manifest.exists()
-    assert workload_manifest.exists()
-    assert namespace_dir.exists()
 
 
 def test_is_git_checkout_returns_false_for_non_checkout(tmp_path: Path) -> None:
@@ -145,27 +105,26 @@ def test_get_git_tracked_remote_fails_when_no_remotes_are_configured(
         get_git_tracked_remote(tmp_path)
 
 
-def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
+def test_create_manifest_commit_stages_full_output_by_default(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Commit creation removes namespace-only directories before staging changes."""
+    """Commit creation stages the full output checkout when no scope is given."""
     porcelain.init(tmp_path)
-    namespace_dir = tmp_path / "surreal3"
-    namespace_dir.mkdir()
-    namespace_manifest = namespace_dir / "namespace-surreal3.yaml"
-    namespace_manifest.write_text("apiVersion: v1\nkind: Namespace\n")
+    manifest = tmp_path / "surreal3" / "namespace-surreal3.yaml"
+    manifest.parent.mkdir()
+    manifest.write_text("apiVersion: v1\nkind: Namespace\n")
     first_commit = _commit_all(tmp_path)
 
+    manifest.write_text("apiVersion: v1\nkind: Namespace\nmetadata: {}\n")
     with caplog.at_level(logging.INFO, logger="manifest_builder.git_utils"):
         create_manifest_commit(
             output_dir=tmp_path,
             version="1.2.3",
             config_remote="https://example.com/config.git",
             config_commit="abc123",
-            generated_files={namespace_manifest},
+            generated_files={manifest},
         )
 
-    assert not namespace_dir.exists()
     assert porcelain.status(tmp_path).unstaged == []
     assert porcelain.status(tmp_path).untracked == []
     with Repo.discover(tmp_path) as repo:
@@ -181,25 +140,35 @@ def test_create_manifest_commit_prunes_namespace_only_directory_before_staging(
     assert f"Created manifest commit in {tmp_path}" in caplog.messages
 
 
-def test_prepare_manifest_changes_preserves_owned_namespace_files(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_create_manifest_commit_stages_only_requested_paths(
+    tmp_path: Path,
 ) -> None:
-    """Pre-commit cleanup must leave files in owned namespace directories alone."""
-    owned = tmp_path / "team-a" / "configmap-foo.yaml"
-    owned.parent.mkdir(parents=True)
-    owned.write_text("apiVersion: v1\nkind: ConfigMap\n")
-    stale = tmp_path / "default" / "configmap-stale.yaml"
-    stale.parent.mkdir()
-    stale.write_text("apiVersion: v1\nkind: ConfigMap\n")
-    fresh = tmp_path / "default" / "configmap-fresh.yaml"
-    fresh.write_text("apiVersion: v1\nkind: ConfigMap\n")
+    """Scoped commits leave pre-existing deletions outside the scope unstaged."""
+    porcelain.init(tmp_path)
+    target = tmp_path / "team-a" / "deployment-app.yaml"
+    protected = tmp_path / "cluster" / "clusterrole-system:metrics-server.yaml"
+    target.parent.mkdir()
+    protected.parent.mkdir()
+    target.write_text("apiVersion: apps/v1\nkind: Deployment\n")
+    protected.write_text(
+        "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\n"
+    )
+    first_commit = _commit_all(tmp_path)
 
-    with caplog.at_level(logging.DEBUG, logger="manifest_builder.git_utils"):
-        _prepare_manifest_changes(tmp_path, {fresh}, owned_namespaces={"team-a"})
+    protected.unlink()
+    target.write_text("apiVersion: apps/v1\nkind: Deployment\nmetadata: {}\n")
 
-    assert owned.exists()
-    assert fresh.exists()
-    assert not stale.exists()
-    assert (
-        "Deleted stale manifest during commit cleanup: default/configmap-stale.yaml"
-    ) in caplog.messages
+    create_manifest_commit(
+        output_dir=tmp_path,
+        version="1.2.3",
+        config_remote="https://example.com/config.git",
+        config_commit="abc123",
+        generated_files={target},
+        stage_paths={tmp_path / "team-a"},
+    )
+
+    with Repo.discover(tmp_path) as repo:
+        assert repo.head() != first_commit
+    assert porcelain.status(tmp_path).unstaged == [
+        b"cluster/clusterrole-system:metrics-server.yaml"
+    ]
