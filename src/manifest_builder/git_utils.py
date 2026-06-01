@@ -127,11 +127,11 @@ def is_git_checkout(path: Path) -> bool:
     Returns:
         True if the directory is in a git checkout, False otherwise
     """
-    if not path.is_dir():
+    if path.exists() and not path.is_dir():
         return False
 
     try:
-        repo = Repo.discover(path)
+        repo = Repo.discover(_nearest_existing_path(path))
         repo.close()
         return True
     except NotGitRepository:
@@ -240,6 +240,36 @@ def _status_is_clean(status: porcelain.GitStatus) -> bool:
     )
 
 
+def _nearest_existing_path(path: Path) -> Path:
+    """Return ``path`` or its nearest existing parent."""
+    current = path
+    while not current.exists() and current != current.parent:
+        current = current.parent
+    return current
+
+
+def _relative_to_repo(repo: Repo, path: Path) -> Path:
+    """Return ``path`` relative to the Dulwich repository working tree."""
+    repo_root = Path(repo.path).resolve()
+    return path.resolve().relative_to(repo_root)
+
+
+def _staged_status_has_path_under_any(
+    status: porcelain.GitStatus, repo_root: Path, roots: set[Path]
+) -> bool:
+    """Return whether staged status contains a path below any root."""
+    for paths in status.staged.values():
+        for raw_path in paths:
+            absolute_path = repo_root / raw_path.decode("utf-8")
+            for root in roots:
+                try:
+                    absolute_path.relative_to(root)
+                except ValueError:
+                    continue
+                return True
+    return False
+
+
 def create_manifest_commit(
     output_dir: Path,
     version: str,
@@ -267,41 +297,43 @@ def create_manifest_commit(
     """
     del generated_files
     try:
-        if stage_paths is None:
-            porcelain.add(output_dir)
-        else:
-            porcelain.add(
-                output_dir, paths=_relative_stage_paths(output_dir, stage_paths)
+        repo = Repo.discover(output_dir)
+        try:
+            repo_root = Path(repo.path).resolve()
+            output_root = output_dir.resolve()
+            roots = {output_root}
+            if stage_paths is None:
+                pathspecs = [str(_relative_to_repo(repo, output_dir))]
+            else:
+                roots = {path.resolve() for path in stage_paths}
+                pathspecs = _relative_stage_paths(repo, stage_paths)
+
+            porcelain.add(repo, paths=pathspecs)
+            status = porcelain.status(repo)
+            if not _staged_status_has_path_under_any(status, repo_root, roots):
+                logger.info("There is nothing to commit.")
+                return
+
+            commit_message = (
+                f"Generate manifests\n"
+                f"\n"
+                f"Config remote: {config_remote}\n"
+                f"Config commit: {config_commit}\n"
+                f"Tool version: {version}"
             )
-
-        status = porcelain.status(output_dir)
-        if not _status_has_staged_changes(status):
-            logger.info("There is nothing to commit.")
-            return
-
-        commit_message = (
-            f"Generate manifests\n"
-            f"\n"
-            f"Config remote: {config_remote}\n"
-            f"Config commit: {config_commit}\n"
-            f"Tool version: {version}"
-        )
-        porcelain.commit(output_dir, message=commit_message.encode())
+            porcelain.commit(repo, message=commit_message.encode())
+        finally:
+            repo.close()
         logger.info("Created manifest commit in %s", output_dir)
     except Exception as e:
         raise RuntimeError(f"Failed to create git commit in {output_dir}: {e}") from e
 
 
-def _relative_stage_paths(output_dir: Path, stage_paths: set[Path]) -> list[str]:
+def _relative_stage_paths(repo: Repo, stage_paths: set[Path]) -> list[str]:
     relative_paths: list[str] = []
     for path in sorted(stage_paths):
         try:
-            relative_paths.append(str(path.relative_to(output_dir)))
+            relative_paths.append(str(_relative_to_repo(repo, path)))
         except ValueError:
             relative_paths.append(str(path))
     return relative_paths
-
-
-def _status_has_staged_changes(status: porcelain.GitStatus) -> bool:
-    """Return whether a Dulwich status has staged add, modify, or delete paths."""
-    return any(paths for paths in status.staged.values())

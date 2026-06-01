@@ -35,6 +35,14 @@ def test_is_git_checkout_returns_false_for_non_checkout(tmp_path: Path) -> None:
     assert not is_git_checkout(tmp_path)
 
 
+def test_is_git_checkout_accepts_nested_checkout_path(tmp_path: Path) -> None:
+    """Output directories below a checkout root are valid commit targets."""
+    porcelain.init(tmp_path)
+    output_dir = tmp_path / "manifests" / "platform-dev"
+
+    assert is_git_checkout(output_dir)
+
+
 def test_is_git_dirty_accepts_tracked_subdirectory(tmp_path: Path) -> None:
     """A clean tracked config subdirectory can be checked from inside a repo."""
     porcelain.init(tmp_path)
@@ -138,6 +146,68 @@ def test_create_manifest_commit_stages_full_output_by_default(
         b"Tool version: 1.2.3"
     )
     assert f"Created manifest commit in {tmp_path}" in caplog.messages
+
+
+def test_create_manifest_commit_uses_parent_checkout_for_nested_output(
+    tmp_path: Path,
+) -> None:
+    """Commit creation stages nested output paths from their parent checkout."""
+    porcelain.init(tmp_path)
+    output_dir = tmp_path / "manifests" / "platform-dev"
+    stale = output_dir / "default" / "configmap-stale.yaml"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("apiVersion: v1\nkind: ConfigMap\n")
+    first_commit = _commit_all(tmp_path)
+
+    stale.unlink()
+    fresh = output_dir / "default" / "configmap-fresh.yaml"
+    fresh.write_text("apiVersion: v1\nkind: ConfigMap\n")
+    unrelated = tmp_path / "notes.txt"
+    unrelated.write_text("keep me out of the manifest commit\n")
+
+    create_manifest_commit(
+        output_dir=output_dir,
+        version="1.2.3",
+        config_remote="https://example.com/config.git",
+        config_commit="abc123",
+        generated_files={fresh},
+        stage_paths={fresh.parent},
+    )
+
+    status = porcelain.status(tmp_path)
+    assert status.staged == {"add": [], "delete": [], "modify": []}
+    assert status.unstaged == []
+    assert status.untracked == [b"notes.txt"]
+    with Repo.discover(output_dir) as repo:
+        assert repo.head() != first_commit
+        commit = cast(Commit, repo[repo.head()])
+    assert fresh.exists()
+    assert not stale.exists()
+    assert b"Generate manifests" in commit.message
+
+
+def test_create_manifest_commit_noop_ignores_untracked_parent_files(
+    tmp_path: Path,
+) -> None:
+    """Untracked files outside a nested output directory do not force a commit."""
+    porcelain.init(tmp_path)
+    output_dir = tmp_path / "manifests" / "platform-dev"
+    manifest = output_dir / "default" / "configmap-fresh.yaml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("apiVersion: v1\nkind: ConfigMap\n")
+    first_commit = _commit_all(tmp_path)
+    (tmp_path / "notes.txt").write_text("keep me out of the manifest commit\n")
+
+    create_manifest_commit(
+        output_dir=output_dir,
+        version="1.2.3",
+        config_remote="https://example.com/config.git",
+        config_commit="abc123",
+        generated_files={manifest},
+    )
+
+    with Repo.discover(output_dir) as repo:
+        assert repo.head() == first_commit
 
 
 def test_create_manifest_commit_stages_only_requested_paths(
