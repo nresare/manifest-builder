@@ -289,6 +289,54 @@ def test_generate_simple_omits_arch_node_selector_when_unset(tmp_path: Path) -> 
     assert "nodeSelector" not in deployment["spec"]["template"]["spec"]
 
 
+def test_generate_simple_custom_token_audiences_inject_projected_tokens(
+    tmp_path: Path,
+) -> None:
+    """Custom token audiences inject projected service account tokens."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        custom_token_audiences=["vault", "api"],
+    )
+
+    generate_simple(config, tmp_path / "output")
+
+    deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
+    pod_spec = deployment["spec"]["template"]["spec"]
+    container = pod_spec["containers"][0]
+    assert container["volumeMounts"] == [
+        {
+            "name": "tokens",
+            "mountPath": "/var/run/secrets/tokens",
+            "readOnly": True,
+        }
+    ]
+    assert pod_spec["volumes"] == [
+        {
+            "name": "tokens",
+            "projected": {
+                "sources": [
+                    {
+                        "serviceAccountToken": {
+                            "path": "vault",
+                            "expirationSeconds": 3600,
+                            "audience": "vault",
+                        }
+                    },
+                    {
+                        "serviceAccountToken": {
+                            "path": "api",
+                            "expirationSeconds": 3600,
+                            "audience": "api",
+                        }
+                    },
+                ]
+            },
+        }
+    ]
+
+
 def test_generate_manifests_with_simple_config(tmp_path: Path) -> None:
     """generate_manifests dispatches to simple generation."""
     config = SimpleConfig(
