@@ -26,6 +26,7 @@ from manifest_builder.handlers import ConfigHandler, GenerationContext
 from manifest_builder.website import (
     _config_checksum,
     _configmap_suffix_from_mount_path,
+    _inject_custom_token_projection,
     _make_configmaps,
 )
 
@@ -149,6 +150,7 @@ def _parse_simple_config(
             "iam-role",
             "k8s-role",
             "config",
+            "custom-token-audiences",
             "extra-resources",
             "replicas",
             "arch",
@@ -179,6 +181,15 @@ def _parse_simple_config(
     if arch is not None and not isinstance(arch, str):
         raise ValueError(f"'arch' must be a string in {source_file}")
 
+    custom_token_audiences = data.get("custom-token-audiences")
+    if custom_token_audiences is not None and (
+        not isinstance(custom_token_audiences, list)
+        or not all(isinstance(audience, str) for audience in custom_token_audiences)
+    ):
+        raise ValueError(
+            f"'custom-token-audiences' must be a list of strings in {source_file}"
+        )
+
     namespace = data.get("namespace", default_namespace)
     image = data.get("image", default_image)
     name = data.get("name", namespace)
@@ -194,6 +205,7 @@ def _parse_simple_config(
         iam_role=iam_role,
         k8s_role=k8s_role,
         config=_parse_config_files(data.get("config"), source_file),
+        custom_token_audiences=custom_token_audiences,
         variables=variables.copy(),
         extra_resources=extra_resources,
         replicas=data.get("replicas", DEFAULT_REPLICA_COUNT),
@@ -313,5 +325,9 @@ def generate_simple(
 
     k8s_name = _make_k8s_name(config.name)
     _inject_configmaps(docs, config, k8s_name, context)
+
+    if config.custom_token_audiences:
+        for doc in docs:
+            _inject_custom_token_projection(doc, config.custom_token_audiences)
 
     return _write_documents(docs, output_dir, config.namespace, config.name)

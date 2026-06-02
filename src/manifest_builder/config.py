@@ -179,6 +179,7 @@ class SimpleConfig:
     iam_role: str | None = None
     k8s_role: str | None = None
     config: dict[str, Path] | None = None  # container path -> resolved local path
+    custom_token_audiences: list[str] | None = None
     variables: dict[str, TemplateValue] = field(default_factory=dict)
     extra_resources: Path | None = (
         None  # directory with additional YAML resources to include

@@ -733,6 +733,51 @@ def test_load_simple_config_with_arch(tmp_path: Path) -> None:
     assert config.arch == "arm64"
 
 
+def test_load_simple_config_with_custom_token_audiences(tmp_path: Path) -> None:
+    """Simple config can specify custom audiences for projected tokens."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        custom-token-audiences = ["vault", "api"]
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.custom_token_audiences == ["vault", "api"]
+
+
+def test_load_simple_config_custom_token_audiences_must_be_list(
+    tmp_path: Path,
+) -> None:
+    """Simple custom token audiences must be configured as a string list."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        custom-token-audiences = "vault"
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="'custom-token-audiences' must be a list of strings",
+    ):
+        load_test_configs(conf)
+
+
 def test_load_simple_config_arch_must_be_string(tmp_path: Path) -> None:
     conf = tmp_path / "conf"
     conf.mkdir()
