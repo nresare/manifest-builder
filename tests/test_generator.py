@@ -73,6 +73,29 @@ def test_write_manifests_cluster_scoped_resource(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_write_manifests_crossplane_cluster_provider_config_is_cluster_scoped(
+    tmp_path: Path,
+) -> None:
+    """Crossplane ClusterProviderConfig resources do not get a namespace."""
+    content = """\
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: InjectedIdentity
+"""
+
+    paths = write_manifests(content, tmp_path, "default")
+
+    assert len(paths) == 1
+    (path,) = paths
+    assert path == tmp_path / "cluster" / "clusterproviderconfig-default.yaml"
+    doc = yaml.safe_load(path.read_text())
+    assert "namespace" not in doc.get("metadata", {})
+
+
 def test_write_manifests_replaces_colons_in_filenames(tmp_path: Path) -> None:
     """Object names with colons keep their metadata but get safe filenames."""
     content = """\

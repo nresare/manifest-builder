@@ -331,6 +331,7 @@ CLUSTER_SCOPED_KINDS = {
     "CertificateSigningRequest",
     "ClusterRole",
     "ClusterRoleBinding",
+    "ClusterProviderConfig",
     "CSIDriver",
     "CSINode",
     "CustomResourceDefinition",
