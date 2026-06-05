@@ -10,6 +10,8 @@ from dulwich import porcelain
 import pytest
 import yaml
 
+from conftest import init_test_repo
+
 from manifest_builder import GenerationResult, __version__, generate
 from manifest_builder.api import (
     DEPLOY_ID_ANNOTATION,
@@ -46,8 +48,8 @@ def test_generate_reports_changed_objects_and_adds_deploy_id(
     output = tmp_path / "output"
     config.mkdir()
     output.mkdir()
-    porcelain.init(config)
-    porcelain.init(output)
+    init_test_repo(config)
+    init_test_repo(output)
     (config / "config.toml").write_text(
         """\
 [[simple]]
@@ -95,7 +97,7 @@ def test_generate_ignores_deploy_id_only_manifest_changes(tmp_path: Path) -> Non
     """A new deploy id alone should not make otherwise unchanged objects modified."""
     output = tmp_path / "output"
     output.mkdir()
-    porcelain.init(output)
+    init_test_repo(output)
     manifest = output / "idcat" / "configmap-settings.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
@@ -139,7 +141,7 @@ def test_generate_restores_deploy_id_only_changes_without_config_commit(
     """Git-backed output preserves existing deploy ids when no new id is available."""
     output = tmp_path / "output"
     output.mkdir()
-    porcelain.init(output)
+    init_test_repo(output)
     manifest = output / "idcat" / "configmap-settings.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
@@ -188,7 +190,7 @@ def test_generate_restores_deploy_id_only_changes_with_unresolved_output_path(
     caller = tmp_path / "caller"
     output.mkdir()
     caller.mkdir()
-    porcelain.init(output)
+    init_test_repo(output)
     manifest = output / "idcat" / "configmap-settings.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
@@ -454,7 +456,7 @@ def test_system_mode_reconciles_system_owner_roots_and_commit(
     output = tmp_path / "output"
     config.mkdir()
     output.mkdir()
-    config_repo = porcelain.init(config)
+    config_repo = init_test_repo(config)
     config_file = config_repo.get_config()
     config_file.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
     config_file.write_to_path()
@@ -468,7 +470,7 @@ image = "registry.example.com/team-a:1.0"
     )
     _commit_all(config)
 
-    porcelain.init(output)
+    init_test_repo(output)
     team_stale = output / "team-a" / "configmap-old.yaml"
     team_stale.parent.mkdir()
     team_stale.write_text(
@@ -629,7 +631,7 @@ def test_namespace_mode_commit_does_not_stage_preexisting_cluster_deletion(
     output = tmp_path / "output"
     config.mkdir()
     output.mkdir()
-    config_repo = porcelain.init(config)
+    config_repo = init_test_repo(config)
     config_file = config_repo.get_config()
     config_file.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
     config_file.write_to_path()
@@ -642,7 +644,7 @@ image = "registry.example.com/team-a:1.0"
     )
     _commit_all(config)
 
-    porcelain.init(output)
+    init_test_repo(output)
     protected = output / "cluster" / "clusterrole-system:metrics-server.yaml"
     protected.parent.mkdir()
     protected.write_text(

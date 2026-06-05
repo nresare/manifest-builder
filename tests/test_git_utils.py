@@ -11,6 +11,8 @@ from dulwich.objects import Commit
 from dulwich.repo import Repo
 import pytest
 
+from conftest import init_test_repo
+
 from manifest_builder.git_utils import (
     create_manifest_commit,
     get_git_tracked_remote,
@@ -37,7 +39,7 @@ def test_is_git_checkout_returns_false_for_non_checkout(tmp_path: Path) -> None:
 
 def test_is_git_checkout_accepts_nested_checkout_path(tmp_path: Path) -> None:
     """Output directories below a checkout root are valid commit targets."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
     output_dir = tmp_path / "manifests" / "platform-dev"
 
     assert is_git_checkout(output_dir)
@@ -45,7 +47,7 @@ def test_is_git_checkout_accepts_nested_checkout_path(tmp_path: Path) -> None:
 
 def test_is_git_dirty_accepts_tracked_subdirectory(tmp_path: Path) -> None:
     """A clean tracked config subdirectory can be checked from inside a repo."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
     config_dir = tmp_path / ".deploy"
     config_dir.mkdir()
     config_file = config_dir / "config.toml"
@@ -59,7 +61,7 @@ def test_get_git_tracked_remote_returns_current_branch_remote_url(
     tmp_path: Path,
 ) -> None:
     """The tracked remote URL is resolved from the current branch config."""
-    repo = porcelain.init(tmp_path)
+    repo = init_test_repo(tmp_path)
     config = repo.get_config()
     config.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
     config.set((b"branch", b"master"), b"remote", b"origin")
@@ -74,7 +76,7 @@ def test_get_git_tracked_remote_uses_only_remote_for_detached_head(
     tmp_path: Path,
 ) -> None:
     """Detached HEAD checkouts use the sole configured remote URL."""
-    repo = porcelain.init(tmp_path)
+    repo = init_test_repo(tmp_path)
     config = repo.get_config()
     config.set((b"remote", b"upstream"), b"url", b"https://example.com/config.git")
     config.write_to_path()
@@ -90,7 +92,7 @@ def test_get_git_tracked_remote_prefers_origin_for_detached_head(
     tmp_path: Path,
 ) -> None:
     """Detached HEAD checkouts with several remotes prefer origin."""
-    repo = porcelain.init(tmp_path)
+    repo = init_test_repo(tmp_path)
     config = repo.get_config()
     config.set((b"remote", b"fork"), b"url", b"https://example.com/fork.git")
     config.set((b"remote", b"origin"), b"url", b"https://example.com/config.git")
@@ -107,7 +109,7 @@ def test_get_git_tracked_remote_fails_when_no_remotes_are_configured(
     tmp_path: Path,
 ) -> None:
     """A checkout without configured remotes fails with an explicit error."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
 
     with pytest.raises(RuntimeError, match="No git remotes are configured"):
         get_git_tracked_remote(tmp_path)
@@ -117,7 +119,7 @@ def test_create_manifest_commit_stages_full_output_by_default(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Commit creation stages the full output checkout when no scope is given."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
     manifest = tmp_path / "surreal3" / "namespace-surreal3.yaml"
     manifest.parent.mkdir()
     manifest.write_text("apiVersion: v1\nkind: Namespace\n")
@@ -152,7 +154,7 @@ def test_create_manifest_commit_uses_parent_checkout_for_nested_output(
     tmp_path: Path,
 ) -> None:
     """Commit creation stages nested output paths from their parent checkout."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
     output_dir = tmp_path / "manifests" / "platform-dev"
     stale = output_dir / "default" / "configmap-stale.yaml"
     stale.parent.mkdir(parents=True)
@@ -190,7 +192,7 @@ def test_create_manifest_commit_noop_ignores_untracked_parent_files(
     tmp_path: Path,
 ) -> None:
     """Untracked files outside a nested output directory do not force a commit."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
     output_dir = tmp_path / "manifests" / "platform-dev"
     manifest = output_dir / "default" / "configmap-fresh.yaml"
     manifest.parent.mkdir(parents=True)
@@ -214,7 +216,7 @@ def test_create_manifest_commit_stages_only_requested_paths(
     tmp_path: Path,
 ) -> None:
     """Scoped commits leave pre-existing deletions outside the scope unstaged."""
-    porcelain.init(tmp_path)
+    init_test_repo(tmp_path)
     target = tmp_path / "team-a" / "deployment-app.yaml"
     protected = tmp_path / "cluster" / "clusterrole-system:metrics-server.yaml"
     target.parent.mkdir()
