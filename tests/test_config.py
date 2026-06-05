@@ -1836,8 +1836,8 @@ source = "manifests"
     assert config.name == "my-app"
 
 
-def test_load_copy_config_missing_namespace(tmp_path: Path) -> None:
-    """Missing namespace field raises ValueError."""
+def test_load_copy_config_missing_namespace_and_name(tmp_path: Path) -> None:
+    """Missing both namespace and name raises ValueError."""
     write_toml(
         tmp_path,
         "config.toml",
@@ -1846,8 +1846,27 @@ def test_load_copy_config_missing_namespace(tmp_path: Path) -> None:
 source = "manifests"
 """,
     )
-    with pytest.raises(ValueError, match="Missing required field 'namespace'"):
+    with pytest.raises(ValueError, match="must set either 'name' or 'namespace'"):
         load_test_configs(tmp_path)
+
+
+def test_load_copy_config_namespace_optional_when_name_set(tmp_path: Path) -> None:
+    """Namespace is optional at parse time when name is provided."""
+    (tmp_path / "manifests").mkdir()
+    write_toml(
+        tmp_path,
+        "config.toml",
+        """\
+[[copy]]
+name = "cluster-stuff"
+source = "manifests"
+""",
+    )
+    configs = load_test_configs(tmp_path)
+    config = only_config(configs)
+    assert isinstance(config, CopyConfig)
+    assert config.name == "cluster-stuff"
+    assert config.namespace is None
 
 
 def test_load_copy_config_missing_source(tmp_path: Path) -> None:
