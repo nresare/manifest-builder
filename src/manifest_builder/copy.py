@@ -92,18 +92,16 @@ def _parse_copy_config(
         table_index,
     )
 
-    required_fields = ["source"]
-    if default_namespace is None:
-        required_fields.append("namespace")
-    for required_field in required_fields:
-        if required_field not in data:
-            raise ValueError(
-                f"Missing required field '{required_field}' in {source_file}"
-            )
+    if "source" not in data:
+        raise ValueError(f"Missing required field 'source' in {source_file}")
 
     config_dir = source_file.parent
     namespace = data.get("namespace", default_namespace)
     name = data.get("name", namespace)
+    if name is None:
+        raise ValueError(
+            f"[[copy]] entry in {source_file} must set either 'name' or 'namespace'"
+        )
     source = config_dir / data["source"]
 
     config_dict = None
@@ -160,11 +158,25 @@ def generate_copy(
 
         for doc in yaml.safe_load_all(text):
             if doc:
-                kind = doc.get("kind")
-                if kind and kind not in CLUSTER_SCOPED_KINDS:
-                    if "namespace" not in doc.get("metadata", {}):
-                        doc.setdefault("metadata", {})["namespace"] = config.namespace
                 docs.append(doc)
+
+    needs_namespace = bool(config.config) or any(
+        doc.get("kind")
+        and doc.get("kind") not in CLUSTER_SCOPED_KINDS
+        and "namespace" not in doc.get("metadata", {})
+        for doc in docs
+    )
+    if needs_namespace and config.namespace is None:
+        raise ValueError(
+            f"'namespace' is required for copy config '{config.name}' "
+            "because it contains namespaced resources"
+        )
+
+    for doc in docs:
+        kind = doc.get("kind")
+        if kind and kind not in CLUSTER_SCOPED_KINDS:
+            if "namespace" not in doc.get("metadata", {}):
+                doc.setdefault("metadata", {})["namespace"] = config.namespace
 
     if config.config:
         k8s_name = _make_k8s_name(config.name)

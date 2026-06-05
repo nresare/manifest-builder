@@ -116,6 +116,107 @@ spec:
     assert out["metadata"]["namespace"] == "other-ns"
 
 
+def test_generate_copy_cluster_scoped_only_allows_no_namespace(tmp_path: Path) -> None:
+    """When all source resources are cluster-scoped, namespace can be omitted."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "clusterrole.yaml").write_text(
+        """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: acme-dns-role
+rules: []
+"""
+    )
+
+    output_dir = tmp_path / "output"
+    config = CopyConfig(name="cluster-stuff", namespace=None, source=manifests_dir)
+    paths = generate_copy(config, output_dir)
+
+    out_file = output_dir / "cluster" / "clusterrole-acme-dns-role.yaml"
+    assert out_file.exists()
+    assert paths == {out_file}
+
+
+def test_generate_copy_requires_namespace_for_namespaced_resource(
+    tmp_path: Path,
+) -> None:
+    """Namespaced resources without an explicit namespace require config.namespace."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "service.yaml").write_text(
+        """\
+apiVersion: v1
+kind: Service
+metadata:
+  name: acme-dns
+spec:
+  ports:
+    - port: 53
+"""
+    )
+
+    output_dir = tmp_path / "output"
+    config = CopyConfig(name="acme-dns", namespace=None, source=manifests_dir)
+    with pytest.raises(ValueError, match="namespace.*is required"):
+        generate_copy(config, output_dir)
+
+
+def test_generate_copy_requires_namespace_when_config_present(tmp_path: Path) -> None:
+    """A config table (creates ConfigMap) requires config.namespace."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "clusterrole.yaml").write_text(
+        """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: acme-dns-role
+rules: []
+"""
+    )
+    cfg_file = tmp_path / "app.cfg"
+    cfg_file.write_text("setting=true\n")
+
+    output_dir = tmp_path / "output"
+    config = CopyConfig(
+        name="acme-dns",
+        namespace=None,
+        source=manifests_dir,
+        config={"/config/app.cfg": cfg_file},
+    )
+    with pytest.raises(ValueError, match="namespace.*is required"):
+        generate_copy(config, output_dir)
+
+
+def test_generate_copy_namespaced_resource_with_metadata_ns_no_config_namespace(
+    tmp_path: Path,
+) -> None:
+    """Namespaced resources that have metadata.namespace don't require config.namespace."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "service.yaml").write_text(
+        """\
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-svc
+  namespace: other-ns
+spec:
+  ports:
+    - port: 80
+"""
+    )
+
+    output_dir = tmp_path / "output"
+    config = CopyConfig(name="cluster-stuff", namespace=None, source=manifests_dir)
+    generate_copy(config, output_dir)
+
+    out_file = output_dir / "other-ns" / "service-my-svc.yaml"
+    assert out_file.exists()
+
+
 def test_generate_copy_cluster_scoped_resources_no_namespace(tmp_path: Path) -> None:
     """Cluster-scoped resources (e.g. ClusterRole) do not get a namespace."""
     manifests_dir = tmp_path / "manifests"

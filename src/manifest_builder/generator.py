@@ -965,7 +965,7 @@ def strip_helm_metadata(doc: dict) -> dict:
 def _write_documents(
     documents: list[dict],
     output_dir: Path,
-    namespace: str,
+    namespace: str | None,
     app_name: str | None = None,
 ) -> set[Path]:
     written: set[Path] = set()
@@ -986,6 +986,10 @@ def _write_documents(
             subdir = "cluster"
         else:
             subdir = doc.get("metadata", {}).get("namespace") or namespace
+            if subdir is None:
+                raise ValueError(
+                    f"Cannot write namespaced resource {kind}/{name} without a namespace"
+                )
         dest_dir = output_dir / subdir
         dest_dir.mkdir(parents=True, exist_ok=True)
 

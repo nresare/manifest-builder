@@ -193,8 +193,8 @@ class CopyConfig:
     """Configuration for an app that copies existing manifests verbatim."""
 
     name: str
-    namespace: str
     source: Path  # resolved directory containing manifests to copy
+    namespace: str | None = None
     config: dict[str, Path] | None = None  # container path -> resolved local path
 
 
