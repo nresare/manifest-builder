@@ -31,6 +31,18 @@ def _format_scanner_error(error: ScannerError, config_dir: Path) -> str:
     return " ".join(str(error).split())
 
 
+def _format_manifest_error(error: ManifestError, output_dir: Path) -> str:
+    message = str(error.cause)
+    output_path = (Path.cwd() / output_dir).resolve()
+    for raw_path in sorted({str(path) for path in output_path.rglob("*.yaml")}):
+        try:
+            display_path = str(Path(raw_path).resolve().relative_to(output_path))
+        except ValueError:
+            continue
+        message = message.replace(raw_path, display_path)
+    return f"Error processing {error.config_name}: {message}"
+
+
 @click.command()
 @click.version_option(version=__version__, prog_name="manifest-builder")
 @click.option(
@@ -105,7 +117,7 @@ def main(
         )
 
     except ManifestError as e:
-        click.echo(f"Error processing {e.config_name}: {e}", err=True)
+        click.echo(_format_manifest_error(e, output_dir), err=True)
         sys.exit(1)
     except ScannerError as e:
         logger.fatal(_format_scanner_error(e, config_dir))
