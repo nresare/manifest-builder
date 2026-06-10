@@ -192,6 +192,7 @@ def run_helm_template(
         chart,
         "--namespace",
         namespace,
+        "--include-crds",
     ]
 
     for values_file in values_files:

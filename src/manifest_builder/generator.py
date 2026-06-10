@@ -4,7 +4,6 @@
 
 import logging
 import tempfile
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -476,25 +475,6 @@ def _generate_helm_manifests(
         manifest_content = stream.getvalue()
 
     paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
-
-    # Handle CRDs from the chart's crds directory (helm template doesn't include these)
-    chart_dir_path = Path(chart_path)
-    if chart_dir_path.is_dir():
-        crds_dir = chart_dir_path / "crds"
-        if crds_dir.is_dir():
-            crd_docs: list[dict] = []
-            start = time.perf_counter()
-            for yaml_file in sorted(crds_dir.glob("**/*.yaml")):
-                crd_docs.extend(_load_all_yaml(yaml_file.read_text()))
-            if crd_docs:
-                crd_paths = _write_documents(
-                    crd_docs, output_dir, config.namespace, config.name
-                )
-                paths.update(crd_paths)
-                elapsed = time.perf_counter() - start
-                logger.info(
-                    f"Copied {len(crd_docs)} CRD{plural(len(crd_docs))} in {elapsed:.2f}s"
-                )
 
     # Handle extra resources if configured
     if config.extra_resources:
