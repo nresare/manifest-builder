@@ -638,75 +638,14 @@ def test_ensure_namespaces_nonexistent_output_dir(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_generate_helm_manifests_includes_crds(tmp_path: Path) -> None:
-    """CRDs from chart's crds/ directory are included in output."""
+def test_generate_helm_manifests_writes_crds_returned_by_helm(
+    tmp_path: Path,
+) -> None:
+    """CRDs emitted by helm template are written as cluster-scoped manifests."""
     output_dir = tmp_path / "output"
     charts_dir = tmp_path / "charts"
     charts_dir.mkdir()
 
-    # Create a fake chart directory with CRDs
-    chart_dir = charts_dir / "my-chart"
-    chart_dir.mkdir()
-    crds_dir = chart_dir / "crds"
-    crds_dir.mkdir()
-
-    # Create a CRD YAML file
-    crd_yaml = crds_dir / "crd.yaml"
-    crd_content = """\
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: myresources.example.com
-spec:
-  group: example.com
-  names:
-    kind: MyResource
-  scope: Namespaced
-"""
-    crd_yaml.write_text(crd_content)
-
-    config = ChartConfig(
-        name="my-chart",
-        namespace="default",
-        chart="my-chart",
-        repo="https://example.com",
-        version="1.0.0",
-        values=[],
-        release=None,
-    )
-
-    with (
-        mock.patch(
-            "manifest_builder.generator.pull_chart",
-            return_value=chart_dir,
-        ),
-        mock.patch(
-            "manifest_builder.generator.run_helm_template",
-            return_value="",  # No templated manifests
-        ),
-    ):
-        paths = _generate_helm_manifests(config, output_dir, charts_dir)
-
-    # Verify CRD was written to cluster directory
-    crd_output = (
-        output_dir / "cluster" / "customresourcedefinition-myresources.example.com.yaml"
-    )
-    assert crd_output.exists()
-
-    # Verify the content
-    written_crd = yaml.safe_load(crd_output.read_text())
-    assert written_crd["kind"] == "CustomResourceDefinition"
-    assert written_crd["metadata"]["name"] == "myresources.example.com"
-    assert crd_output in paths
-
-
-def test_generate_helm_manifests_no_crds_dir(tmp_path: Path) -> None:
-    """When chart has no crds/ directory, only templated manifests are included."""
-    output_dir = tmp_path / "output"
-    charts_dir = tmp_path / "charts"
-    charts_dir.mkdir()
-
-    # Create a fake chart directory without CRDs
     chart_dir = charts_dir / "my-chart"
     chart_dir.mkdir()
 
@@ -720,67 +659,22 @@ def test_generate_helm_manifests_no_crds_dir(tmp_path: Path) -> None:
         release=None,
     )
 
-    with (
-        mock.patch(
-            "manifest_builder.generator.pull_chart",
-            return_value=chart_dir,
-        ),
-        mock.patch(
-            "manifest_builder.generator.run_helm_template",
-            return_value="",  # No templated manifests
-        ),
-    ):
-        paths = _generate_helm_manifests(config, output_dir, charts_dir)
-
-    # Verify no cluster directory was created (no CRDs)
-    cluster_dir = output_dir / "cluster"
-    assert not cluster_dir.exists() or not any(cluster_dir.iterdir())
-    assert len(paths) == 0
-
-
-def test_generate_helm_manifests_crds_with_templated_manifests(tmp_path: Path) -> None:
-    """CRDs are combined with templated manifests in output."""
-    output_dir = tmp_path / "output"
-    charts_dir = tmp_path / "charts"
-    charts_dir.mkdir()
-
-    # Create a fake chart directory with CRDs
-    chart_dir = charts_dir / "my-chart"
-    chart_dir.mkdir()
-    crds_dir = chart_dir / "crds"
-    crds_dir.mkdir()
-
-    # Create a CRD YAML file
-    crd_yaml = crds_dir / "crd.yaml"
-    crd_yaml.write_text("""\
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: myresources.example.com
-spec:
-  group: example.com
-  names:
-    kind: MyResource
-  scope: Namespaced
-""")
-
-    config = ChartConfig(
-        name="my-chart",
-        namespace="default",
-        chart="my-chart",
-        repo="https://example.com",
-        version="1.0.0",
-        values=[],
-        release=None,
-    )
-
-    # Mock helm template to return a deployment
     templated_manifest = """\
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: my-app
 spec: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: myresources.example.com
+spec:
+  group: example.com
+  names:
+    kind: MyResource
+  scope: Namespaced
 """
 
     with (
@@ -795,7 +689,6 @@ spec: {}
     ):
         paths = _generate_helm_manifests(config, output_dir, charts_dir)
 
-    # Verify both CRD and deployment are in output
     crd_output = (
         output_dir / "cluster" / "customresourcedefinition-myresources.example.com.yaml"
     )
@@ -806,45 +699,28 @@ spec: {}
     assert len(paths) == 2
 
 
-def test_generate_helm_manifests_crds_in_subdirectories(tmp_path: Path) -> None:
-    """CRDs in subdirectories of crds/ directory are included recursively."""
+def test_generate_helm_manifests_does_not_copy_crds_from_chart_directory(
+    tmp_path: Path,
+) -> None:
+    """CRDs are not copied separately from the chart filesystem."""
     output_dir = tmp_path / "output"
     charts_dir = tmp_path / "charts"
     charts_dir.mkdir()
 
-    # Create a fake chart directory with CRDs in subdirectories
     chart_dir = charts_dir / "my-chart"
     chart_dir.mkdir()
     crds_dir = chart_dir / "crds"
     crds_dir.mkdir()
-
-    # Create CRD in subdirectory
-    sub_dir = crds_dir / "v1"
-    sub_dir.mkdir()
-    crd_yaml = sub_dir / "resource.yaml"
+    crd_yaml = crds_dir / "crd.yaml"
     crd_yaml.write_text("""\
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: items.example.com
+  name: myresources.example.com
 spec:
   group: example.com
   names:
-    kind: Item
-  scope: Namespaced
-""")
-
-    # Create CRD at root of crds/ directory
-    root_crd = crds_dir / "root.yaml"
-    root_crd.write_text("""\
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: roots.example.com
-spec:
-  group: example.com
-  names:
-    kind: Root
+    kind: MyResource
   scope: Namespaced
 """)
 
@@ -870,17 +746,11 @@ spec:
     ):
         paths = _generate_helm_manifests(config, output_dir, charts_dir)
 
-    # Verify both CRDs are in output (one from root, one from subdirectory)
-    root_crd_output = (
-        output_dir / "cluster" / "customresourcedefinition-roots.example.com.yaml"
+    crd_output = (
+        output_dir / "cluster" / "customresourcedefinition-myresources.example.com.yaml"
     )
-    sub_crd_output = (
-        output_dir / "cluster" / "customresourcedefinition-items.example.com.yaml"
-    )
-
-    assert root_crd_output.exists()
-    assert sub_crd_output.exists()
-    assert len(paths) == 2
+    assert not crd_output.exists()
+    assert paths == set()
 
 
 def test_generate_helm_manifests_init_single_deployment(tmp_path: Path) -> None:

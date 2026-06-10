@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from manifest_builder.helm import ChartCacheStats, pull_chart
+from manifest_builder.helm import ChartCacheStats, pull_chart, run_helm_template
 
 
 def test_pull_chart_uses_cached_chart(
@@ -122,3 +122,26 @@ def test_pull_chart_oci_without_version(mock_run: MagicMock, tmp_path: Path) -> 
     assert "oci://docker.io/envoyproxy/gateway-helm" in cmd
     assert "--repo" not in cmd
     assert "--version" not in cmd
+
+
+@patch("manifest_builder.helm.check_helm_available", return_value=True)
+@patch("manifest_builder.helm.subprocess.run")
+def test_run_helm_template_includes_crds(
+    mock_run: MagicMock,
+    mock_check_helm_available: MagicMock,
+) -> None:
+    """helm template should ask Helm to include chart CRDs."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+    run_helm_template(
+        release_name="my-release",
+        chart="my-chart",
+        namespace="default",
+        values_files=[],
+    )
+
+    call_args = mock_run.call_args
+    cmd = call_args[0][0]
+
+    assert "--include-crds" in cmd
+    mock_check_helm_available.assert_called_once_with()
