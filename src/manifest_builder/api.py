@@ -5,11 +5,13 @@ import json
 import logging
 import shutil
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from manifest_builder import __version__
 from manifest_builder.config import (
+    TemplateValue,
     load_configs,
     load_extra_variables,
     load_images,
@@ -54,6 +56,7 @@ def generate(
     vars_from: Path | None = None,
     namespace: str | None = None,
     image: str | None = None,
+    vars: Mapping[str, TemplateValue] | None = None,
 ) -> GenerationResult:
     """Generate manifests from ``config`` into ``output``.
 
@@ -78,6 +81,9 @@ def generate(
         image: Optional image override for namespace-owner mode. When set,
             simple and website config entries use this image and must not also
             set an ``image`` field in the config file.
+        vars: Optional extra template variables, merged into the ``[variables]``
+            table from config.toml the same way as variables loaded with
+            ``vars_from``.
 
     Returns:
         Summary of written paths and object-level changes.
@@ -87,9 +93,7 @@ def generate(
 
     config = repo_root / config
     output = repo_root / output
-    extra_variables = (
-        load_extra_variables(repo_root / vars_from) if vars_from is not None else None
-    )
+    extra_variables = _load_api_variables(repo_root, vars_from, vars)
 
     if image is not None and namespace is None:
         raise ValueError("generate(image=...) can only be used when namespace is set")
@@ -209,6 +213,46 @@ def generate(
         )
 
     return result
+
+
+def _load_api_variables(
+    repo_root: Path,
+    vars_from: Path | None,
+    vars: Mapping[str, TemplateValue] | None,
+) -> dict[str, TemplateValue] | None:
+    """Load and validate extra variables supplied through the API."""
+    extra_variables = (
+        load_extra_variables(repo_root / vars_from) if vars_from is not None else {}
+    )
+
+    if vars is not None:
+        if not isinstance(vars, Mapping):
+            raise ValueError("generate(vars=...) must be a mapping")
+
+        api_variables: dict[str, TemplateValue] = {}
+        for key, value in vars.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    "Variable keys passed to generate(vars=...) must be strings"
+                )
+            if not isinstance(value, str | int | float | bool):
+                raise ValueError(
+                    f"Variable '{key}' passed to generate(vars=...) must be a "
+                    "string, number, or boolean"
+                )
+            api_variables[key] = value
+
+        overlap = sorted(set(extra_variables) & set(api_variables))
+        if overlap:
+            names = ", ".join(repr(name) for name in overlap)
+            suffix = "s" if len(overlap) != 1 else ""
+            raise ValueError(
+                f"Variable{suffix} {names} passed via both vars_from and "
+                "generate(vars=...)"
+            )
+        extra_variables = {**extra_variables, **api_variables}
+
+    return extra_variables or None
 
 
 def _collect_generation_result(
