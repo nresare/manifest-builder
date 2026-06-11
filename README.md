@@ -40,6 +40,14 @@ from manifest_builder import generate
 written_paths = generate(Path("conf"), Path("output"))
 ```
 
+Extra template variables can be supplied directly from Python. They are merged
+with the `[variables]` table in `config.toml` just like values loaded with
+`--vars-from`:
+
+```python
+generate(Path("conf"), Path("output"), vars={"domain": "example.com"})
+```
+
 ## Externally-owned output roots
 
 When the output repository is shared with other services or pipelines that

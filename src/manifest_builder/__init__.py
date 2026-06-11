@@ -2,10 +2,12 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Manifest Builder - Generate Kubernetes manifests from configuration input."""
 
+from collections.abc import Mapping
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from manifest_builder.config import TemplateValue
 from manifest_builder.result import GenerationResult, KubernetesObjectRef
 
 try:
@@ -28,20 +30,13 @@ def generate(
     allow_dirty_config: bool = False,
     namespace: str | None = None,
     image: str | None = None,
+    *,
+    vars_from: Path | None = None,
+    vars: Mapping[str, TemplateValue] | None = None,
 ) -> GenerationResult:
     """Generate manifests from ``config`` into ``output``."""
     # Keep this wrapper lazy: api imports __version__ from this module.
     from manifest_builder.api import generate as api_generate
-
-    if namespace is None and image is None:
-        return api_generate(
-            config,
-            output,
-            repo_root,
-            verbose,
-            create_commit,
-            allow_dirty_config,
-        )
 
     return api_generate(
         config,
@@ -50,8 +45,10 @@ def generate(
         verbose,
         create_commit,
         allow_dirty_config,
+        vars_from=vars_from,
         namespace=namespace,
         image=image,
+        vars=vars,
     )
 
 

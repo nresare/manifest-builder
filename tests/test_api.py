@@ -16,6 +16,7 @@ from manifest_builder import GenerationResult, __version__, generate
 from manifest_builder.api import (
     DEPLOY_ID_ANNOTATION,
     _collect_generation_result,
+    _load_api_variables,
     _load_system_owner_roots,
     _make_deploy_id,
     generate as api_generate,
@@ -309,6 +310,119 @@ def test_generate_accepts_config_and_output_paths(
         managed_namespaces=None,
         cleanup=False,
     )
+
+
+@mock.patch("manifest_builder.api.generate_manifests")
+@mock.patch("manifest_builder.api.load_owned_namespaces", return_value=set())
+@mock.patch("manifest_builder.api.load_images", return_value={})
+@mock.patch("manifest_builder.api.resolve_configs", return_value=["resolved"])
+@mock.patch("manifest_builder.api.load_configs", return_value=["loaded"])
+@mock.patch("manifest_builder.api.load_helmfile", return_value=None)
+def test_generate_passes_vars_as_extra_variables(
+    mock_load_helmfile: mock.Mock,
+    mock_load_configs: mock.Mock,
+    mock_resolve_configs: mock.Mock,
+    mock_load_images: mock.Mock,
+    mock_load_owned_namespaces: mock.Mock,
+    mock_generate_manifests: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    """The API vars parameter is merged like --vars-from variables."""
+    del (
+        mock_load_helmfile,
+        mock_resolve_configs,
+        mock_load_images,
+        mock_load_owned_namespaces,
+    )
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    config.mkdir()
+    output.mkdir()
+    mock_generate_manifests.return_value = {output / "app" / "deployment-app.yaml"}
+
+    api_generate(
+        config,
+        output,
+        repo_root=tmp_path,
+        vars={"cluster_name": "prod", "replica_count": 3, "use_tls": True},
+    )
+
+    mock_load_configs.assert_called_once_with(
+        config,
+        mock.ANY,
+        extra_variables={
+            "cluster_name": "prod",
+            "replica_count": 3,
+            "use_tls": True,
+        },
+        default_namespace=None,
+        default_image=None,
+    )
+
+
+def test_generate_renders_simple_extra_resources_with_vars(tmp_path: Path) -> None:
+    """Direct API variables render the same templates as --vars-from variables."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    extra = config / "extra"
+    extra.mkdir(parents=True)
+    output.mkdir()
+    (extra / "configmap.yaml").write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{k8s_name}}-settings
+data:
+  domain: {{domain}}
+"""
+    )
+    (config / "config.toml").write_text(
+        """\
+[[simple]]
+namespace = "idcat"
+image = "registry.example.com/idcat:1.0"
+extra-resources = "extra"
+"""
+    )
+
+    result = api_generate(
+        config, output, repo_root=tmp_path, vars={"domain": "example.com"}
+    )
+
+    configmap = output / "idcat" / "configmap-idcat-settings.yaml"
+    assert configmap in result.written_paths
+    assert yaml.safe_load(configmap.read_text())["data"]["domain"] == "example.com"
+
+
+def test_load_api_variables_merges_vars_from_and_vars(tmp_path: Path) -> None:
+    """In-memory API variables can be combined with file-loaded variables."""
+    vars_file = tmp_path / "extra.toml"
+    vars_file.write_text('domain = "example.com"\n')
+
+    assert _load_api_variables(
+        tmp_path, Path("extra.toml"), {"cluster_name": "prod"}
+    ) == {
+        "domain": "example.com",
+        "cluster_name": "prod",
+    }
+
+
+def test_load_api_variables_rejects_vars_from_conflict(tmp_path: Path) -> None:
+    """Duplicate variables across API sources are rejected."""
+    vars_file = tmp_path / "extra.toml"
+    vars_file.write_text('domain = "example.com"\n')
+
+    with pytest.raises(ValueError, match="'domain'"):
+        _load_api_variables(tmp_path, Path("extra.toml"), {"domain": "other.com"})
+
+
+def test_load_api_variables_rejects_nested_vars(tmp_path: Path) -> None:
+    """API variables follow the same scalar-only rules as --vars-from."""
+    bad_vars = yaml.safe_load("domain:\n  name: example.com\n")
+
+    with pytest.raises(ValueError, match="'domain'.*string, number, or boolean"):
+        _load_api_variables(tmp_path, None, bad_vars)
 
 
 @mock.patch("manifest_builder.api.generate_manifests")
@@ -701,6 +815,10 @@ def test_top_level_generate_delegates_to_api(mock_generate: mock.Mock) -> None:
         True,
         True,
         True,
+        vars_from=None,
+        namespace=None,
+        image=None,
+        vars=None,
     )
 
 
@@ -726,6 +844,37 @@ def test_top_level_generate_passes_namespace_image(mock_generate: mock.Mock) -> 
         False,
         False,
         False,
+        vars_from=None,
         namespace="team-a",
         image="registry.example.com/app:1.0",
+        vars=None,
+    )
+
+
+@mock.patch(
+    "manifest_builder.api.generate",
+    return_value=GenerationResult(written_paths={Path("/out/app.yaml")}),
+)
+def test_top_level_generate_passes_vars(mock_generate: mock.Mock) -> None:
+    """The top-level convenience wrapper exposes direct API variables."""
+    result = generate(
+        Path("conf"),
+        Path("output"),
+        repo_root=Path("/repo"),
+        vars_from=Path("extra.toml"),
+        vars={"domain": "example.com"},
+    )
+
+    assert result.written_paths == {Path("/out/app.yaml")}
+    mock_generate.assert_called_once_with(
+        Path("conf"),
+        Path("output"),
+        Path("/repo"),
+        False,
+        False,
+        False,
+        vars_from=Path("extra.toml"),
+        namespace=None,
+        image=None,
+        vars={"domain": "example.com"},
     )
