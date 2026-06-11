@@ -28,6 +28,7 @@ from manifest_builder.git_utils import (
     GitManifestChanges,
     create_manifest_commit,
     get_git_commit,
+    get_git_commit_subject,
     get_git_head_file,
     get_git_manifest_changes,
     get_git_tracked_remote,
@@ -195,12 +196,14 @@ def generate(
     if create_commit:
         if config_commit is None:
             config_commit = get_git_commit(config)
+        config_subject = get_git_commit_subject(config)
         config_remote = get_git_tracked_remote(config)
         create_manifest_commit(
             output,
             __version__,
             config_remote,
             config_commit,
+            config_subject,
             written_paths,
             commit_paths,
         )

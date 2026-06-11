@@ -60,6 +60,28 @@ def get_git_commit(path: Path) -> str:
         raise RuntimeError(f"Failed to get git commit for {path}: {e}") from e
 
 
+def get_git_commit_subject(path: Path) -> str:
+    """
+    Get the first line of the current git commit message for a directory.
+
+    Args:
+        path: Directory to get commit subject for
+
+    Returns:
+        First line of the HEAD commit message
+
+    Raises:
+        RuntimeError: If not a git repository or git operations fail
+    """
+    try:
+        repo = Repo.discover(path)
+        with repo:
+            commit = cast(Commit, repo[repo.head()])
+            return commit.message.decode("utf-8", errors="replace").partition("\n")[0]
+    except Exception as e:
+        raise RuntimeError(f"Failed to get git commit subject for {path}: {e}") from e
+
+
 def get_git_tracked_remote(path: Path) -> str:
     """
     Get the URL of the remote that identifies the current checkout.
@@ -275,6 +297,7 @@ def create_manifest_commit(
     version: str,
     config_remote: str,
     config_commit: str,
+    config_subject: str,
     generated_files: set[Path],
     stage_paths: set[Path] | None = None,
 ) -> None:
@@ -288,6 +311,7 @@ def create_manifest_commit(
         version: Version of manifest-builder
         config_remote: URL of the remote tracked by the config branch
         config_commit: Commit hash of the config directory
+        config_subject: First line of the config commit message
         generated_files: Set of file paths that were generated in this run
         stage_paths: Paths under ``output_dir`` to stage. If omitted, the full
             output checkout is staged.
@@ -315,7 +339,7 @@ def create_manifest_commit(
                 return
 
             commit_message = (
-                f"Generate manifests\n"
+                f"Generated from: {config_subject}\n"
                 f"\n"
                 f"Config remote: {config_remote}\n"
                 f"Config commit: {config_commit}\n"
