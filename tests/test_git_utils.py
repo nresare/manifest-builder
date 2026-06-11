@@ -15,6 +15,7 @@ from conftest import init_test_repo
 
 from manifest_builder.git_utils import (
     create_manifest_commit,
+    get_git_commit_subject,
     get_git_tracked_remote,
     is_git_checkout,
     is_git_dirty,
@@ -115,6 +116,22 @@ def test_get_git_tracked_remote_fails_when_no_remotes_are_configured(
         get_git_tracked_remote(tmp_path)
 
 
+def test_get_git_commit_subject_returns_first_message_line(tmp_path: Path) -> None:
+    """The config commit subject comes from the first line of HEAD."""
+    init_test_repo(tmp_path)
+    (tmp_path / "config.toml").write_text("name = 'example'\n")
+    _commit_all(
+        tmp_path,
+        message=(
+            b"Update production config\n"
+            b"\n"
+            b"Switch the image tag for the production deployment."
+        ),
+    )
+
+    assert get_git_commit_subject(tmp_path) == "Update production config"
+
+
 def test_create_manifest_commit_stages_full_output_by_default(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -132,6 +149,7 @@ def test_create_manifest_commit_stages_full_output_by_default(
             version="1.2.3",
             config_remote="https://example.com/config.git",
             config_commit="abc123",
+            config_subject="Update production config",
             generated_files={manifest},
         )
 
@@ -141,7 +159,7 @@ def test_create_manifest_commit_stages_full_output_by_default(
         assert repo.head() != first_commit
         commit = cast(Commit, repo[repo.head()])
     assert commit.message == (
-        b"Generate manifests\n"
+        b"Generated from: Update production config\n"
         b"\n"
         b"Config remote: https://example.com/config.git\n"
         b"Config commit: abc123\n"
@@ -172,6 +190,7 @@ def test_create_manifest_commit_uses_parent_checkout_for_nested_output(
         version="1.2.3",
         config_remote="https://example.com/config.git",
         config_commit="abc123",
+        config_subject="Update production config",
         generated_files={fresh},
         stage_paths={fresh.parent},
     )
@@ -185,7 +204,7 @@ def test_create_manifest_commit_uses_parent_checkout_for_nested_output(
         commit = cast(Commit, repo[repo.head()])
     assert fresh.exists()
     assert not stale.exists()
-    assert b"Generate manifests" in commit.message
+    assert b"Generated from: Update production config" in commit.message
 
 
 def test_create_manifest_commit_noop_ignores_untracked_parent_files(
@@ -205,6 +224,7 @@ def test_create_manifest_commit_noop_ignores_untracked_parent_files(
         version="1.2.3",
         config_remote="https://example.com/config.git",
         config_commit="abc123",
+        config_subject="Update production config",
         generated_files={manifest},
     )
 
@@ -235,6 +255,7 @@ def test_create_manifest_commit_stages_only_requested_paths(
         version="1.2.3",
         config_remote="https://example.com/config.git",
         config_commit="abc123",
+        config_subject="Update production config",
         generated_files={target},
         stage_paths={tmp_path / "team-a"},
     )
