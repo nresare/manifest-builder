@@ -271,6 +271,42 @@ def test_generate_copy_creates_configmap_from_config(tmp_path: Path) -> None:
     assert cm["data"]["app.cfg"] == "[dns]\nport = 53\n"
 
 
+def test_generate_copy_configmap_preserves_unicode_as_block_scalar(
+    tmp_path: Path,
+) -> None:
+    """Config content with non-ASCII characters renders as a literal block.
+
+    Without allow_unicode, PyYAML cannot emit a block scalar for strings
+    containing non-ASCII characters (such as an em-dash) and falls back to a
+    double-quoted single line with escaped newlines.
+    """
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    cfg_file = tmp_path / "app.cfg"
+    content = "[dns]\n# Primary resolver — do not change\nport = 53\n"
+    cfg_file.write_text(content)
+
+    output_dir = tmp_path / "output"
+    config = _make_config(
+        tmp_path,
+        manifests_dir,
+        config={"/config/app.cfg": cfg_file},
+    )
+    generate_copy(config, output_dir)
+
+    cm_file = output_dir / "acme-dns" / "configmap-acme-dns-config.yaml"
+    raw = cm_file.read_text()
+    # Em-dash is emitted literally, not escaped.
+    assert "—" in raw
+    assert "\\u2014" not in raw
+    # A literal block scalar is used (no escaped newlines on a single line).
+    assert "app.cfg: |" in raw
+    assert "\\n" not in raw
+    # And the round-tripped content matches exactly.
+    cm = _read_yaml(cm_file)
+    assert cm["data"]["app.cfg"] == content
+
+
 def test_generate_copy_configmap_key_is_filename(tmp_path: Path) -> None:
     """The ConfigMap key is the last component of the container path."""
     manifests_dir = tmp_path / "manifests"
