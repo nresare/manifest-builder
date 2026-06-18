@@ -321,6 +321,7 @@ def _dump_yaml(doc: Any, stream: Any) -> None:
         Dumper=YAML_DUMPER,
         default_flow_style=False,
         sort_keys=False,
+        allow_unicode=True,
     )
 
 
@@ -471,6 +472,7 @@ def _generate_helm_manifests(
             Dumper=YAML_DUMPER,
             default_flow_style=False,
             sort_keys=False,
+            allow_unicode=True,
         )
         manifest_content = stream.getvalue()
 
