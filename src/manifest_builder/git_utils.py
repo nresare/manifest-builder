@@ -338,11 +338,18 @@ def create_manifest_commit(
                 logger.info("There is nothing to commit.")
                 return
 
+            output_relative = _relative_to_repo(repo, output_dir)
+            output_line = (
+                f"Output path: {output_relative}\n"
+                if output_relative != Path(".")
+                else ""
+            )
             commit_message = (
                 f"Generated from: {config_subject}\n"
                 f"\n"
                 f"Config remote: {config_remote}\n"
                 f"Config commit: {config_commit}\n"
+                f"{output_line}"
                 f"Tool version: {version}"
             )
             porcelain.commit(repo, message=commit_message.encode())
