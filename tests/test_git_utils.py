@@ -205,6 +205,7 @@ def test_create_manifest_commit_uses_parent_checkout_for_nested_output(
     assert fresh.exists()
     assert not stale.exists()
     assert b"Generated from: Update production config" in commit.message
+    assert b"Output path: manifests/platform-dev\n" in commit.message
 
 
 def test_create_manifest_commit_noop_ignores_untracked_parent_files(
