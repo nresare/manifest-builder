@@ -215,8 +215,14 @@ def load_images(config_dir: Path) -> dict[str, str]:
         repo = "floryn90/hugo"
         version = "0.155.3-alpine"
 
-    Returns a dict mapping template variable names to image references, e.g.:
-        {"git_image": "alpine/git:2.47.2", "hugo_image": "floryn90/hugo:0.155.3-alpine"}
+    Returns a dict mapping template variable names to image references and
+    image versions, e.g.:
+        {
+            "git_image": "alpine/git:2.47.2",
+            "git_version": "2.47.2",
+            "hugo_image": "floryn90/hugo:0.155.3-alpine",
+            "hugo_version": "0.155.3-alpine",
+        }
 
     If images.toml is absent, returns an empty dict so image overrides remain optional.
 
@@ -225,6 +231,7 @@ def load_images(config_dir: Path) -> dict[str, str]:
 
     Returns:
         Dict mapping image variable names to full image references (repo:version)
+        and version variable names to image versions
 
     Raises:
         ValueError: If images.toml is invalid or missing required fields
@@ -249,8 +256,9 @@ def load_images(config_dir: Path) -> dict[str, str]:
                 f"Each image in images.toml must have 'repo' and 'version' fields. "
                 f"Invalid entry: {key}"
             )
-        var_name = key.replace("-", "_") + "_image"
-        result[var_name] = f"{image_def['repo']}:{image_def['version']}"
+        name = key.replace("-", "_")
+        result[f"{name}_image"] = f"{image_def['repo']}:{image_def['version']}"
+        result[f"{name}_version"] = image_def["version"]
 
     return result
 

@@ -2024,8 +2024,11 @@ def test_load_images_returns_image_dict(tmp_path: Path) -> None:
 
     assert images == {
         "git_image": "alpine/git:2.47.2",
+        "git_version": "2.47.2",
         "hugo_image": "floryn90/hugo:0.155.3-alpine",
+        "hugo_version": "0.155.3-alpine",
         "static_web_server_image": "ghcr.io/static-web-server/static-web-server:2.36.1",
+        "static_web_server_version": "2.36.1",
     }
 
 
@@ -2055,6 +2058,8 @@ def test_load_images_converts_hyphens_to_underscores(tmp_path: Path) -> None:
 
     assert "my_custom_image_image" in images
     assert images["my_custom_image_image"] == "example.com/my-image:1.0.0"
+    assert "my_custom_image_version" in images
+    assert images["my_custom_image_version"] == "1.0.0"
 
 
 def test_load_images_raises_on_empty_file(tmp_path: Path) -> None:

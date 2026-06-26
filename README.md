@@ -48,6 +48,29 @@ with the `[variables]` table in `config.toml` just like values loaded with
 generate(Path("conf"), Path("output"), vars={"domain": "example.com"})
 ```
 
+## Image template variables
+
+Shared container image definitions can be placed in `images.toml` in the
+configuration directory:
+
+```toml
+[git]
+repo = "alpine/git"
+version = "2.47.2"
+
+[static-web-server]
+repo = "ghcr.io/static-web-server/static-web-server"
+version = "2.36.1"
+```
+
+Each entry is made available to Mustache templates as both the full image
+reference and the version. Dashes in image names are converted to underscores:
+
+- `{{git_image}}` renders as `alpine/git:2.47.2`
+- `{{git_version}}` renders as `2.47.2`
+- `{{static_web_server_image}}` renders as `ghcr.io/static-web-server/static-web-server:2.36.1`
+- `{{static_web_server_version}}` renders as `2.36.1`
+
 ## Externally-owned output roots
 
 When the output repository is shared with other services or pipelines that
