@@ -1099,6 +1099,64 @@ spec:
     assert "initContainers" not in doc["spec"]["template"]["spec"]
 
 
+def test_generate_helm_manifests_emits_configmap_without_mounts(
+    tmp_path: Path,
+) -> None:
+    """Helm config files should create a ConfigMap without changing Deployments."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    config_file = tmp_path / "app.conf"
+    config_file.write_text("[app]\ndebug = true\n")
+
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        config={"app.conf": config_file},
+    )
+
+    output_dir = tmp_path / "output"
+    charts_dir = tmp_path / "charts"
+    deployment_yaml = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+"""
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template",
+        return_value=deployment_yaml,
+    ):
+        paths = _generate_helm_manifests(config, output_dir, charts_dir)
+
+    deployment_file = output_dir / "default" / "deployment-my-app.yaml"
+    configmap_file = output_dir / "default" / "configmap-my-chart-config.yaml"
+
+    assert paths == {deployment_file, configmap_file}
+
+    configmap = yaml.safe_load(configmap_file.read_text())
+    assert configmap["kind"] == "ConfigMap"
+    assert configmap["metadata"]["name"] == "my-chart-config"
+    assert configmap["metadata"]["namespace"] == "default"
+    assert configmap["data"] == {"app.conf": "[app]\ndebug = true\n"}
+
+    deployment = yaml.safe_load(deployment_file.read_text())
+    pod_spec = deployment["spec"]["template"]["spec"]
+    assert "volumes" not in pod_spec
+    assert "volumeMounts" not in pod_spec["containers"][0]
+
+
 def test_generate_helm_manifests_renders_values_files_with_variables(
     tmp_path: Path,
 ) -> None:

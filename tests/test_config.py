@@ -163,6 +163,31 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
     assert config.values == []
 
 
+def test_load_chart_config_with_config(tmp_path: Path) -> None:
+    """Helm config can specify ConfigMap keys with local file paths."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    config_file = conf_dir / "app.conf"
+    config_file.write_text("debug=true\n")
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        chart = "./charts/myapp"
+        name = "myapp"
+        config = { "app.conf" = "app.conf" }
+        """,
+    )
+
+    configs = load_test_configs(conf_dir)
+    config = only_config(configs)
+
+    assert isinstance(config, ChartConfig)
+    assert config.config == {"app.conf": config_file}
+
+
 def test_load_chart_config_unknown_field_raises(tmp_path: Path) -> None:
     """Unknown Helm fields should fail before generation."""
     conf_dir = tmp_path / "conf"
@@ -1652,6 +1677,22 @@ def test_validate_config_chart_extra_resources_missing_directory(
         extra_resources=tmp_path / "nonexistent",
     )
     with pytest.raises(ValueError, match="Extra resources directory not found"):
+        validate_config(config, tmp_path)
+
+
+def test_validate_config_chart_config_missing_file(tmp_path: Path) -> None:
+    """Validation should fail if a Helm config file doesn't exist."""
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart="./charts/myapp",
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        config={"app.conf": tmp_path / "missing.conf"},
+    )
+    with pytest.raises(ValueError, match="Config file not found for chart"):
         validate_config(config, tmp_path)
 
 

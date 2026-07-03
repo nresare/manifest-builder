@@ -140,6 +140,7 @@ class HelmConfigHandler(ConfigHandler):
                     release=config.release,
                     extra_resources=config.extra_resources,
                     init=config.init,
+                    config=config.config,
                 )
             )
 
@@ -186,6 +187,7 @@ def _parse_chart_config(
             "repo",
             "version",
             "values",
+            "config",
             "extra-resources",
             "init",
         },
@@ -215,6 +217,8 @@ def _parse_chart_config(
     if "init" in data:
         init = config_dir / data["init"]
 
+    config_files = _parse_chart_config_files(data.get("config"), source_file)
+
     if has_release:
         return ChartConfig(
             name=data["release"],
@@ -227,6 +231,7 @@ def _parse_chart_config(
             release=data["release"],
             extra_resources=extra_resources,
             init=init,
+            config=config_files,
         )
 
     if "name" not in data:
@@ -242,7 +247,30 @@ def _parse_chart_config(
         release=None,
         extra_resources=extra_resources,
         init=init,
+        config=config_files,
     )
+
+
+def _parse_chart_config_files(
+    data: object, source_file: Path
+) -> dict[str, Path] | None:
+    """Parse Helm ConfigMap file mappings as config-key -> local file path."""
+    if data is None:
+        return None
+
+    if not isinstance(data, dict):
+        raise ValueError(f"'helm.config' must be a table in {source_file}")
+
+    config_dir = source_file.parent
+    config_files: dict[str, Path] = {}
+    for config_key, local_path in data.items():
+        if not isinstance(config_key, str) or not isinstance(local_path, str):
+            raise ValueError(
+                f"'helm.config' entries must map strings to strings in {source_file}"
+            )
+        config_files[config_key] = config_dir / local_path
+
+    return config_files
 
 
 def _parse_variables(
@@ -478,6 +506,12 @@ def _generate_helm_manifests(
 
     paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
 
+    if config.config:
+        configmap = _make_helm_configmap(config.name, config.namespace, config.config)
+        paths.update(
+            _write_documents([configmap], output_dir, config.namespace, config.name)
+        )
+
     # Handle extra resources if configured
     if config.extra_resources:
         renderer = pystache.Renderer(missing_tags=MissingTags.strict)
@@ -499,6 +533,26 @@ def _generate_helm_manifests(
             logger.debug(f"Copied {len(extra_docs)} extra resources")
 
     return paths
+
+
+def _make_helm_configmap(
+    name: str,
+    namespace: str,
+    config_files: dict[str, Path],
+) -> dict:
+    """Build a Helm companion ConfigMap from config-key -> local file mappings."""
+    return {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": f"{name}-config",
+            "namespace": namespace,
+        },
+        "data": {
+            config_key: local_path.read_text()
+            for config_key, local_path in sorted(config_files.items())
+        },
+    }
 
 
 def _render_values_files(

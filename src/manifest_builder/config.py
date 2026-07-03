@@ -143,6 +143,7 @@ class ChartConfig:
         None  # directory with additional YAML resources to include
     )
     init: Path | None = None  # optional shell script to inject as initContainer
+    config: dict[str, Path] | None = None  # ConfigMap key -> resolved local path
 
 
 @dataclass
@@ -508,6 +509,13 @@ def validate_chart_config(config: ChartConfig, repo_root: Path) -> None:
         if not values_path.exists():
             raise ValueError(
                 f"Values file not found for chart '{config.name}': {values_path}"
+            )
+
+    for config_key, local_path in (config.config or {}).items():
+        if not local_path.exists():
+            raise ValueError(
+                f"Config file not found for chart '{config.name}': {local_path} "
+                f"(mapped from {config_key})"
             )
 
     if config.extra_resources is not None:
