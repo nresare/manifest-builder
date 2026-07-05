@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: The manifest-builder contributors
 """Manifest generation orchestration."""
 
+import hashlib
+import json
 import logging
 import tempfile
 from collections.abc import Sequence
@@ -504,10 +506,33 @@ def _generate_helm_manifests(
         )
         manifest_content = stream.getvalue()
 
-    paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
-
+    configmap = None
     if config.config:
         configmap = _make_helm_configmap(config.name, config.namespace, config.config)
+        checksum = _helm_config_checksum(configmap)
+        docs = _load_all_yaml(manifest_content)
+        for doc in docs:
+            if doc.get("kind") in {"Deployment", "StatefulSet"}:
+                doc.setdefault("spec", {}).setdefault("template", {}).setdefault(
+                    "metadata", {}
+                ).setdefault("annotations", {})["checksum/config"] = checksum
+
+        import io
+
+        stream = io.StringIO()
+        yaml.dump_all(
+            docs,
+            stream,
+            Dumper=YAML_DUMPER,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        manifest_content = stream.getvalue()
+
+    paths = write_manifests(manifest_content, output_dir, config.namespace, config.name)
+
+    if configmap:
         paths.update(
             _write_documents([configmap], output_dir, config.namespace, config.name)
         )
@@ -553,6 +578,18 @@ def _make_helm_configmap(
             for config_key, local_path in sorted(config_files.items())
         },
     }
+
+
+def _helm_config_checksum(configmap: dict) -> str:
+    """Build a deterministic checksum for a Helm companion ConfigMap."""
+    normalized = {
+        "name": configmap["metadata"]["name"],
+        "data": {
+            key: value for key, value in sorted(configmap.get("data", {}).items())
+        },
+    }
+    payload = json.dumps([normalized], separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _render_values_files(

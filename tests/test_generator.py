@@ -1102,7 +1102,7 @@ spec:
 def test_generate_helm_manifests_emits_configmap_without_mounts(
     tmp_path: Path,
 ) -> None:
-    """Helm config files should create a ConfigMap without changing Deployments."""
+    """Helm config files should create a ConfigMap and annotate workloads."""
     chart_dir = tmp_path / "chart"
     chart_dir.mkdir()
     config_file = tmp_path / "app.conf"
@@ -1128,6 +1128,20 @@ metadata:
   name: my-app
 spec:
   template:
+    metadata:
+      annotations:
+        existing: annotation
+    spec:
+      containers:
+      - name: app
+        image: myapp:1.0
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: my-stateful-app
+spec:
+  template:
     spec:
       containers:
       - name: app
@@ -1141,9 +1155,10 @@ spec:
         paths = _generate_helm_manifests(config, output_dir, charts_dir)
 
     deployment_file = output_dir / "default" / "deployment-my-app.yaml"
+    statefulset_file = output_dir / "default" / "statefulset-my-stateful-app.yaml"
     configmap_file = output_dir / "default" / "configmap-my-chart-config.yaml"
 
-    assert paths == {deployment_file, configmap_file}
+    assert paths == {deployment_file, statefulset_file, configmap_file}
 
     configmap = yaml.safe_load(configmap_file.read_text())
     assert configmap["kind"] == "ConfigMap"
@@ -1152,9 +1167,71 @@ spec:
     assert configmap["data"] == {"app.conf": "[app]\ndebug = true\n"}
 
     deployment = yaml.safe_load(deployment_file.read_text())
+    deployment_annotations = deployment["spec"]["template"]["metadata"]["annotations"]
+    assert deployment_annotations["existing"] == "annotation"
+    assert len(deployment_annotations["checksum/config"]) == 64
     pod_spec = deployment["spec"]["template"]["spec"]
     assert "volumes" not in pod_spec
     assert "volumeMounts" not in pod_spec["containers"][0]
+
+    statefulset = yaml.safe_load(statefulset_file.read_text())
+    statefulset_annotations = statefulset["spec"]["template"]["metadata"]["annotations"]
+    assert (
+        statefulset_annotations["checksum/config"]
+        == deployment_annotations["checksum/config"]
+    )
+
+
+def test_generate_helm_manifests_config_checksum_changes_with_content(
+    tmp_path: Path,
+) -> None:
+    """Changing Helm config content should produce a different checksum."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    config_file = tmp_path / "app.conf"
+    config_file.write_text("debug = true\n")
+    config = ChartConfig(
+        name="my-chart",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release=None,
+        config={"app.conf": config_file},
+    )
+    deployment_yaml = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers: []
+"""
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template",
+        return_value=deployment_yaml,
+    ):
+        _generate_helm_manifests(config, tmp_path / "first", tmp_path / "charts")
+        config_file.write_text("debug = false\n")
+        _generate_helm_manifests(config, tmp_path / "second", tmp_path / "charts")
+
+    first = yaml.safe_load(
+        (tmp_path / "first/default/deployment-my-app.yaml").read_text()
+    )
+    second = yaml.safe_load(
+        (tmp_path / "second/default/deployment-my-app.yaml").read_text()
+    )
+    first_checksum = first["spec"]["template"]["metadata"]["annotations"][
+        "checksum/config"
+    ]
+    second_checksum = second["spec"]["template"]["metadata"]["annotations"][
+        "checksum/config"
+    ]
+    assert first_checksum != second_checksum
 
 
 def test_generate_helm_manifests_renders_values_files_with_variables(
