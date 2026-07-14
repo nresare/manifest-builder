@@ -395,6 +395,41 @@ extra-resources = "extra"
     assert yaml.safe_load(configmap.read_text())["data"]["domain"] == "example.com"
 
 
+def test_generate_renders_copy_manifests_with_vars(tmp_path: Path) -> None:
+    """Copy manifests are rendered with the same variables as --vars-from."""
+    config = tmp_path / "config"
+    output = tmp_path / "output"
+    source = config / "manifests"
+    source.mkdir(parents=True)
+    output.mkdir()
+    (source / "configmap.yaml").write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+data:
+  domain: {{domain}}
+"""
+    )
+    (config / "config.toml").write_text(
+        """\
+[[copy]]
+name = "thing"
+namespace = "idcat"
+source = "manifests"
+"""
+    )
+
+    result = api_generate(
+        config, output, repo_root=tmp_path, vars={"domain": "example.com"}
+    )
+
+    configmap = output / "idcat" / "configmap-settings.yaml"
+    assert configmap in result.written_paths
+    assert yaml.safe_load(configmap.read_text())["data"]["domain"] == "example.com"
+
+
 def test_load_api_variables_merges_vars_from_and_vars(tmp_path: Path) -> None:
     """In-memory API variables can be combined with file-loaded variables."""
     vars_file = tmp_path / "extra.toml"

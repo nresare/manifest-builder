@@ -563,6 +563,35 @@ spec:
     assert container["image"] == "example.com/my-app:1.2.3"
 
 
+def test_generate_copy_renders_template_variables(tmp_path: Path) -> None:
+    """Template variables (e.g. from --vars-from) are available to copied manifests."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    (manifests_dir / "configmap.yaml").write_text(
+        """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+data:
+  domain: "{{domain}}"
+"""
+    )
+
+    output_dir = tmp_path / "output"
+    config = CopyConfig(
+        name="my-app",
+        namespace="default",
+        source=manifests_dir,
+        variables={"domain": "example.com"},
+    )
+    paths = generate_copy(config, output_dir)
+
+    assert len(paths) == 1
+    out = _read_yaml(next(iter(paths)))
+    assert out["data"]["domain"] == "example.com"
+
+
 def test_generate_copy_raises_on_missing_image(tmp_path: Path) -> None:
     """Manifest generation fails if a template variable is missing from images."""
     manifests_dir = tmp_path / "manifests"

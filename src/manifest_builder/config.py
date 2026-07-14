@@ -197,6 +197,7 @@ class CopyConfig:
     source: Path  # resolved directory containing manifests to copy
     namespace: str | None = None
     config: dict[str, Path] | None = None  # container path -> resolved local path
+    variables: dict[str, TemplateValue] = field(default_factory=dict)
 
 
 type ManifestConfig = ChartConfig | WebsiteConfig | SimpleConfig | CopyConfig
