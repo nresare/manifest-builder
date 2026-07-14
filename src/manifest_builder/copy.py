@@ -19,6 +19,7 @@ from manifest_builder.config import (
 from manifest_builder.generator import (
     CLUSTER_SCOPED_KINDS,
     _make_k8s_name,
+    _parse_variables,
     _write_documents,
 )
 from manifest_builder.handlers import ConfigHandler, GenerationContext
@@ -50,13 +51,16 @@ class CopyConfigHandler(ConfigHandler):
         if not isinstance(data, list):
             raise ValueError(f"'copy' must be a list of tables in {source_file}")
 
+        variables = _parse_variables(root_config.get("variables"), source_file)
         for index, item in enumerate(data):
             if not isinstance(item, dict):
                 raise ValueError(
                     f"Each [[copy]] entry must be a table in {source_file}"
                 )
             self.configs.append(
-                _parse_copy_config(item, source_file, index, default_namespace)
+                _parse_copy_config(
+                    item, source_file, variables, index, default_namespace
+                )
             )
 
     def iter_configs(self) -> list[CopyConfig]:
@@ -80,6 +84,7 @@ class CopyConfigHandler(ConfigHandler):
 def _parse_copy_config(
     data: dict,
     source_file: Path,
+    variables: dict[str, Any],
     table_index: int = 0,
     default_namespace: str | None = None,
 ) -> CopyConfig:
@@ -123,6 +128,7 @@ def _parse_copy_config(
         namespace=namespace,
         source=source,
         config=config_dict,
+        variables=variables.copy(),
     )
 
 
@@ -137,8 +143,9 @@ def generate_copy(
     namespace into any namespaced resources that don't already have one, and
     optionally creates a ConfigMap from the files listed in the config table.
 
-    If images are provided, the manifests are processed as Mustache templates,
-    replacing {{variable}} with the corresponding image reference.
+    The manifests are processed as Mustache templates, with image references and
+    the config's template variables (including those merged from ``--vars-from``)
+    available as ``{{variable}}`` substitutions.
 
     Args:
         config: Copy app configuration
@@ -150,7 +157,7 @@ def generate_copy(
     """
     renderer = pystache.Renderer(missing_tags=MissingTags.strict)
     docs: list[dict] = []
-    context = images or {}
+    context: dict[str, Any] = {**(images or {}), **config.variables}
 
     for yaml_file in sorted(config.source.glob("*.yaml")):
         text = yaml_file.read_text()
