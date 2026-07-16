@@ -201,12 +201,22 @@ def test_generate_public_repo_role_trusts_main_and_tags(tmp_path: Path) -> None:
     assert statement["Principal"]["Federated"] == (
         f"arn:aws:iam::{ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
     )
+    assert statement["Condition"]["StringEquals"] == {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    }
     subs = statement["Condition"]["StringLike"][
         "token.actions.githubusercontent.com:sub"
     ]
     assert subs == [
-        "repo:PortSwigger/idcat:ref:refs/heads/main",
-        "repo:PortSwigger/idcat:ref:refs/tags/*",
+        "repo:PortSwigger/idcat:*",
+        "repo:PortSwigger@*/idcat@*:*",
+    ]
+    refs = statement["Condition"]["StringLike"][
+        "token.actions.githubusercontent.com:ref"
+    ]
+    assert refs == [
+        "refs/heads/main",
+        "refs/tags/*",
     ]
 
 
@@ -261,12 +271,18 @@ def test_generate_public_repo_with_charts(tmp_path: Path) -> None:
         output_dir / "randomsecret" / "role-randomsecret-ecr-publish.yaml"
     )
     assume = json.loads(role["spec"]["forProvider"]["assumeRolePolicy"])
-    subs = assume["Statement"][0]["Condition"]["StringLike"][
-        "token.actions.githubusercontent.com:sub"
-    ]
+    condition = assume["Statement"][0]["Condition"]
+    assert condition["StringEquals"] == {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    }
+    subs = condition["StringLike"]["token.actions.githubusercontent.com:sub"]
     assert subs == [
-        "repo:PortSwigger/randomsecret:ref:refs/heads/main",
-        "repo:PortSwigger/randomsecret:ref:refs/tags/*",
+        "repo:PortSwigger/randomsecret:*",
+        "repo:PortSwigger@*/randomsecret@*:*",
+    ]
+    assert condition["StringLike"]["token.actions.githubusercontent.com:ref"] == [
+        "refs/heads/main",
+        "refs/tags/*",
     ]
 
     rolepolicy = _read_yaml(
