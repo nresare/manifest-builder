@@ -123,9 +123,8 @@ def generate_public_repo(
     Creates an ecr-public Repository for the images built from
     https://github.com/portswigger/<name>, along with an IAM Role and
     RolePolicy that let the repository's GitHub Actions workflows push to it
-    via OIDC. With enable_charts, a charts/<name> repository is also created,
-    the policy covers it, and the role additionally trusts tag refs so chart
-    releases can publish.
+    via OIDC from the main branch or any tag. With enable_charts, a
+    charts/<name> repository is also created and covered by the policy.
     """
     if _templates_override is not None:
         templates_dir = _templates_override

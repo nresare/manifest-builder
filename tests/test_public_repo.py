@@ -182,8 +182,8 @@ def test_generate_public_repo_repository_contents(tmp_path: Path) -> None:
     )
 
 
-def test_generate_public_repo_role_trusts_main_branch(tmp_path: Path) -> None:
-    """Without charts, the role trusts only the main branch of the repo."""
+def test_generate_public_repo_role_trusts_main_and_tags(tmp_path: Path) -> None:
+    """The role trusts the main branch and any tag of the repo."""
     output_dir = tmp_path / "output"
     generate_public_repo(_make_config(), output_dir)
 
@@ -204,7 +204,10 @@ def test_generate_public_repo_role_trusts_main_branch(tmp_path: Path) -> None:
     subs = statement["Condition"]["StringLike"][
         "token.actions.githubusercontent.com:sub"
     ]
-    assert subs == ["repo:PortSwigger/idcat:ref:refs/heads/main"]
+    assert subs == [
+        "repo:PortSwigger/idcat:ref:refs/heads/main",
+        "repo:PortSwigger/idcat:ref:refs/tags/*",
+    ]
 
 
 def test_generate_public_repo_rolepolicy_resources(tmp_path: Path) -> None:
@@ -229,7 +232,7 @@ def test_generate_public_repo_rolepolicy_resources(tmp_path: Path) -> None:
 
 
 def test_generate_public_repo_with_charts(tmp_path: Path) -> None:
-    """enable_charts adds a charts repository, policy access and tag trust."""
+    """enable_charts adds a charts repository and covers it in the policy."""
     output_dir = tmp_path / "output"
     config = _make_config(name="randomsecret", enable_charts=True)
     paths = generate_public_repo(config, output_dir)
