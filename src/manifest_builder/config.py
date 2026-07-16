@@ -187,6 +187,9 @@ class SimpleConfig:
     )
     replicas: int = DEFAULT_REPLICA_COUNT  # number of deployment replicas
     arch: str | None = None  # node architecture (sets kubernetes.io/arch nodeSelector)
+    random_secrets: list[str] | None = (
+        None  # secret key names for a RandomSecret mounted at /random-secrets
+    )
 
 
 @dataclass

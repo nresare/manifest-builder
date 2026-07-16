@@ -821,6 +821,95 @@ def test_load_simple_config_arch_must_be_string(tmp_path: Path) -> None:
         load_test_configs(conf)
 
 
+def test_load_simple_config_with_random_secret(tmp_path: Path) -> None:
+    """A single random-secret is normalized into a one-element list."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        random-secret = "SESSION_KEY"
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.random_secrets == ["SESSION_KEY"]
+
+
+def test_load_simple_config_with_random_secrets_list(tmp_path: Path) -> None:
+    """A random-secrets list is preserved in order."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        random-secrets = ["API_KEY", "SIGNING_KEY"]
+        """,
+    )
+
+    configs = load_test_configs(conf)
+    config = only_config(configs)
+    assert isinstance(config, SimpleConfig)
+    assert config.random_secrets == ["API_KEY", "SIGNING_KEY"]
+
+
+def test_load_simple_config_rejects_both_random_secret_forms(tmp_path: Path) -> None:
+    """Specifying both random-secret and random-secrets is an error."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        random-secret = "SESSION_KEY"
+        random-secrets = ["API_KEY"]
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Cannot specify both 'random-secret' and 'random-secrets'",
+    ):
+        load_test_configs(conf)
+
+
+def test_load_simple_config_random_secrets_must_be_list_of_strings(
+    tmp_path: Path,
+) -> None:
+    """random-secrets must be a list of strings."""
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    write_toml(
+        conf,
+        "config.toml",
+        """\
+        [[simple]]
+        namespace = "idcat"
+        image = "example.com/idcat:1.0"
+        random-secrets = "API_KEY"
+        """,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="'random-secrets' must be a list of strings",
+    ):
+        load_test_configs(conf)
+
+
 def test_load_simple_config_unknown_field_raises(tmp_path: Path) -> None:
     """Unknown simple fields should fail before generation."""
     conf = tmp_path / "conf"

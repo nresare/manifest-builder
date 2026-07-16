@@ -337,6 +337,74 @@ def test_generate_simple_custom_token_audiences_inject_projected_tokens(
     ]
 
 
+def test_generate_simple_random_secret_emits_manifest_and_mount(
+    tmp_path: Path,
+) -> None:
+    """A single random-secret emits a RandomSecret and mounts it at /random-secrets."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        random_secrets=["SESSION_KEY"],
+    )
+
+    paths = generate_simple(config, tmp_path / "output")
+
+    assert "randomsecret-idcat.yaml" in {path.name for path in paths}
+    random_secret = _read_yaml(
+        tmp_path / "output" / "idcat" / "randomsecret-idcat.yaml"
+    )
+    assert random_secret["apiVersion"] == "noa.re/v1alpha1"
+    assert random_secret["kind"] == "RandomSecret"
+    assert random_secret["metadata"]["name"] == "idcat"
+    assert random_secret["metadata"]["namespace"] == "idcat"
+    assert random_secret["spec"]["secrets"] == [{"name": "SESSION_KEY"}]
+
+    deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
+    pod_spec = deployment["spec"]["template"]["spec"]
+    assert pod_spec["containers"][0]["volumeMounts"] == [
+        {"name": "random-secrets", "mountPath": "/random-secrets"}
+    ]
+    assert pod_spec["volumes"] == [
+        {"name": "random-secrets", "secret": {"secretName": "idcat"}}
+    ]
+
+
+def test_generate_simple_random_secrets_list_enumerates_names(tmp_path: Path) -> None:
+    """A random-secrets list enumerates each name into the RandomSecret spec."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+        random_secrets=["API_KEY", "SIGNING_KEY"],
+    )
+
+    generate_simple(config, tmp_path / "output")
+
+    random_secret = _read_yaml(
+        tmp_path / "output" / "idcat" / "randomsecret-idcat.yaml"
+    )
+    assert random_secret["spec"]["secrets"] == [
+        {"name": "API_KEY"},
+        {"name": "SIGNING_KEY"},
+    ]
+
+
+def test_generate_simple_omits_random_secret_when_unset(tmp_path: Path) -> None:
+    """Without random secrets, no RandomSecret or mount is produced."""
+    config = SimpleConfig(
+        name="idcat",
+        namespace="idcat",
+        image="registry.example.com/idcat:1.0",
+    )
+
+    paths = generate_simple(config, tmp_path / "output")
+
+    assert not any(path.name.startswith("randomsecret-") for path in paths)
+    deployment = _read_yaml(tmp_path / "output" / "idcat" / "deployment-idcat.yaml")
+    assert "volumes" not in deployment["spec"]["template"]["spec"]
+
+
 def test_generate_manifests_with_simple_config(tmp_path: Path) -> None:
     """generate_manifests dispatches to simple generation."""
     config = SimpleConfig(
