@@ -193,6 +193,16 @@ class SimpleConfig:
 
 
 @dataclass
+class PublicRepoConfig:
+    """Configuration for a public ECR repository with GitHub Actions publish access."""
+
+    name: str
+    namespace: str
+    enable_charts: bool = False  # also create a charts/<name> repository
+    variables: dict[str, TemplateValue] = field(default_factory=dict)
+
+
+@dataclass
 class CopyConfig:
     """Configuration for an app that copies existing manifests verbatim."""
 
@@ -203,7 +213,9 @@ class CopyConfig:
     variables: dict[str, TemplateValue] = field(default_factory=dict)
 
 
-type ManifestConfig = ChartConfig | WebsiteConfig | SimpleConfig | CopyConfig
+type ManifestConfig = (
+    ChartConfig | WebsiteConfig | SimpleConfig | CopyConfig | PublicRepoConfig
+)
 CONFIG_FILE_NAMES = ("config.toml", "manifest-builder.toml")
 
 
@@ -558,5 +570,7 @@ def validate_config(config: ManifestConfig, repo_root: Path) -> None:
         validate_simple_config(config)
     elif isinstance(config, CopyConfig):
         validate_copy_config(config)
+    elif isinstance(config, PublicRepoConfig):
+        pass  # public-repo configs reference no local files
     else:
         validate_chart_config(config, repo_root)
