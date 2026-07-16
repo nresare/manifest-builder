@@ -24,8 +24,8 @@ spec:
               },
               "StringLike": {
                 "token.actions.githubusercontent.com:sub": [
-                  "repo:PortSwigger/{{name}}:ref:refs/heads/main"{{#enable_charts}},
-                  "repo:PortSwigger/{{name}}:ref:refs/tags/*"{{/enable_charts}}
+                  "repo:PortSwigger/{{name}}:ref:refs/heads/main",
+                  "repo:PortSwigger/{{name}}:ref:refs/tags/*"
                 ]
               }
             }
