@@ -26,6 +26,7 @@ from manifest_builder.config import (
 from manifest_builder.copy import CopyConfigHandler
 from manifest_builder.generator import HelmConfigHandler
 from manifest_builder.helmfile import Helmfile, HelmfileRelease, HelmfileRepository
+from manifest_builder.public_repo import PublicRepoConfigHandler
 from manifest_builder.simple import SimpleConfigHandler
 from manifest_builder.website import WebsiteConfigHandler
 
@@ -50,13 +51,18 @@ def only_config(
 
 
 def config_handlers() -> list[
-    HelmConfigHandler | WebsiteConfigHandler | SimpleConfigHandler | CopyConfigHandler
+    HelmConfigHandler
+    | WebsiteConfigHandler
+    | SimpleConfigHandler
+    | CopyConfigHandler
+    | PublicRepoConfigHandler
 ]:
     return [
         HelmConfigHandler(),
         WebsiteConfigHandler(),
         SimpleConfigHandler(),
         CopyConfigHandler(),
+        PublicRepoConfigHandler(),
     ]
 
 

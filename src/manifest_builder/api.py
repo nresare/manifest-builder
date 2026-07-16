@@ -38,6 +38,7 @@ from manifest_builder.git_utils import (
     is_git_dirty,
 )
 from manifest_builder.helmfile import load_helmfile
+from manifest_builder.public_repo import PublicRepoConfigHandler
 from manifest_builder.result import GenerationResult, KubernetesObjectRef
 from manifest_builder.simple import SimpleConfigHandler
 from manifest_builder.website import WebsiteConfigHandler
@@ -126,6 +127,7 @@ def generate(
         WebsiteConfigHandler(),
         SimpleConfigHandler(),
         CopyConfigHandler(),
+        PublicRepoConfigHandler(),
     ]
     handlers = load_configs(
         config,
