@@ -638,6 +638,37 @@ def test_ensure_namespaces_nonexistent_output_dir(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_generate_helm_manifests_uses_name_override(tmp_path: Path) -> None:
+    """The Helm invocation should use the configured release name override."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    config = ChartConfig(
+        name="release-from-helmfile",
+        namespace="default",
+        chart=str(chart_dir),
+        repo=None,
+        version=None,
+        values=[],
+        release="release-from-helmfile",
+        name_override="rendered-release",
+    )
+
+    with mock.patch(
+        "manifest_builder.generator.run_helm_template", return_value=""
+    ) as run_helm_template:
+        paths = _generate_helm_manifests(
+            config, tmp_path / "output", tmp_path / "charts"
+        )
+
+    assert paths == set()
+    run_helm_template.assert_called_once_with(
+        release_name="rendered-release",
+        chart=str(chart_dir),
+        namespace="default",
+        values_files=[],
+    )
+
+
 def test_generate_helm_manifests_writes_crds_returned_by_helm(
     tmp_path: Path,
 ) -> None:

@@ -143,6 +143,7 @@ class HelmConfigHandler(ConfigHandler):
                     extra_resources=config.extra_resources,
                     init=config.init,
                     config=config.config,
+                    name_override=config.name_override,
                 )
             )
 
@@ -192,6 +193,7 @@ def _parse_chart_config(
             "config",
             "extra-resources",
             "init",
+            "name-override",
         },
         source_file,
         table_index,
@@ -234,6 +236,7 @@ def _parse_chart_config(
             extra_resources=extra_resources,
             init=init,
             config=config_files,
+            name_override=data.get("name-override"),
         )
 
     if "name" not in data:
@@ -250,6 +253,7 @@ def _parse_chart_config(
         extra_resources=extra_resources,
         init=init,
         config=config_files,
+        name_override=data.get("name-override"),
     )
 
 
@@ -447,7 +451,7 @@ def _generate_helm_manifests(
             config.values, Path(temp_dir), values_context
         )
         manifest_content = run_helm_template(
-            release_name=config.name,
+            release_name=config.name_override or config.name,
             chart=chart_path,
             namespace=config.namespace,
             values_files=values_paths,
