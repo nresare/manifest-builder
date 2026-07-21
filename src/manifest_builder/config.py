@@ -144,6 +144,7 @@ class ChartConfig:
     )
     init: Path | None = None  # optional shell script to inject as initContainer
     config: dict[str, Path] | None = None  # ConfigMap key -> resolved local path
+    name_override: str | None = None  # optional release name passed to helm template
 
 
 @dataclass

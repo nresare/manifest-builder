@@ -169,6 +169,30 @@ def test_values_empty_when_not_specified(tmp_path: Path) -> None:
     assert config.values == []
 
 
+def test_load_chart_config_with_name_override(tmp_path: Path) -> None:
+    """Helm configs can override the release name passed to Helm."""
+    conf_dir = tmp_path / "conf"
+    conf_dir.mkdir()
+    write_toml(
+        conf_dir,
+        "config.toml",
+        """\
+        [[helm]]
+        namespace = "default"
+        release = "myapp"
+        name-override = "myapp-rendered"
+        """,
+    )
+
+    configs = load_test_configs(conf_dir)
+    config = only_config(configs)
+
+    assert isinstance(config, ChartConfig)
+    assert config.name == "myapp"
+    assert config.release == "myapp"
+    assert config.name_override == "myapp-rendered"
+
+
 def test_load_chart_config_with_config(tmp_path: Path) -> None:
     """Helm config can specify ConfigMap keys with local file paths."""
     conf_dir = tmp_path / "conf"
@@ -1057,6 +1081,7 @@ def test_resolve_configs_fills_in_chart_and_repo(tmp_path: Path) -> None:
         version=None,
         values=[],
         release="myapp",
+        name_override="myapp-rendered",
     )
     resolved = resolve_configs(manifest_configs(helm=[config]), _make_helmfile())
     assert len(all_configs(resolved)) == 1
@@ -1065,6 +1090,7 @@ def test_resolve_configs_fills_in_chart_and_repo(tmp_path: Path) -> None:
     assert resolved_config.chart == "myapp"
     assert resolved_config.repo == "https://charts.example.com"
     assert resolved_config.version == "1.2.3"
+    assert resolved_config.name_override == "myapp-rendered"
 
 
 def test_resolve_configs_no_helmfile_raises_when_release_present(
