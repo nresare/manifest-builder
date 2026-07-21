@@ -1213,6 +1213,60 @@ spec:
     )
 
 
+def test_name_overrides_avoid_helm_configmap_collisions(tmp_path: Path) -> None:
+    """Name overrides should distinguish ConfigMaps for a shared Helmfile release."""
+    chart_dir = tmp_path / "chart"
+    chart_dir.mkdir()
+    first_config_file = tmp_path / "first.conf"
+    first_config_file.write_text("instance = first\n")
+    second_config_file = tmp_path / "second.conf"
+    second_config_file.write_text("instance = second\n")
+    configs = [
+        ChartConfig(
+            name="shared-release",
+            namespace="default",
+            chart=str(chart_dir),
+            repo=None,
+            version=None,
+            values=[],
+            release="shared-release",
+            config={"app.conf": first_config_file},
+            name_override="first-release",
+        ),
+        ChartConfig(
+            name="shared-release",
+            namespace="default",
+            chart=str(chart_dir),
+            repo=None,
+            version=None,
+            values=[],
+            release="shared-release",
+            config={"app.conf": second_config_file},
+            name_override="second-release",
+        ),
+    ]
+    output_dir = tmp_path / "output"
+
+    with mock.patch("manifest_builder.generator.run_helm_template", return_value=""):
+        paths = generate_manifests(
+            [HelmConfigHandler(configs)],
+            output_dir,
+            repo_root=tmp_path,
+            charts_dir=tmp_path / "charts",
+        )
+
+    first_path = output_dir / "default" / "configmap-first-release-config.yaml"
+    second_path = output_dir / "default" / "configmap-second-release-config.yaml"
+    assert first_path in paths
+    assert second_path in paths
+    assert yaml.safe_load(first_path.read_text())["data"] == {
+        "app.conf": "instance = first\n"
+    }
+    assert yaml.safe_load(second_path.read_text())["data"] == {
+        "app.conf": "instance = second\n"
+    }
+
+
 def test_generate_helm_manifests_config_checksum_changes_with_content(
     tmp_path: Path,
 ) -> None:

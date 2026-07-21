@@ -446,12 +446,13 @@ def _generate_helm_manifests(
         **(images or {}),
         **config.variables,
     }
+    helm_release_name = config.name_override or config.name
     with tempfile.TemporaryDirectory(prefix="manifest-builder-values-") as temp_dir:
         values_paths = _render_values_files(
             config.values, Path(temp_dir), values_context
         )
         manifest_content = run_helm_template(
-            release_name=config.name_override or config.name,
+            release_name=helm_release_name,
             chart=chart_path,
             namespace=config.namespace,
             values_files=values_paths,
@@ -512,7 +513,9 @@ def _generate_helm_manifests(
 
     configmap = None
     if config.config:
-        configmap = _make_helm_configmap(config.name, config.namespace, config.config)
+        configmap = _make_helm_configmap(
+            helm_release_name, config.namespace, config.config
+        )
         checksum = _helm_config_checksum(configmap)
         docs = _load_all_yaml(manifest_content)
         for doc in docs:
